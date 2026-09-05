@@ -48,6 +48,7 @@ RECIPE_FILES = UPGRADE_FILE = RESEARCH_FILE = None
 LOCALIZATION_FILE = BASE_LOCALIZATION_FILE = BASE_ICONS_DIR = None
 ITEM_FILES = BLOCK_FILES = None
 BASE_ITEM_FILE = BASE_BLOCK_FILE = None
+MOD_ITEM_MODIFIERS_FILE = BASE_ITEM_MODIFIERS_FILE = None
 TRADERS_FILE = QUESTS_FILE = LOOT_CONTAINERS_FILE = LOOT_GROUP_FILES = None
 RECYCLE_FILE = None
 
@@ -86,6 +87,7 @@ def configure_paths(install_root):
     global RECIPE_FILES, UPGRADE_FILE, RESEARCH_FILE
     global LOCALIZATION_FILE, BASE_LOCALIZATION_FILE, BASE_ICONS_DIR
     global ITEM_FILES, BLOCK_FILES, BASE_ITEM_FILE, BASE_BLOCK_FILE
+    global MOD_ITEM_MODIFIERS_FILE, BASE_ITEM_MODIFIERS_FILE
     global TRADERS_FILE, QUESTS_FILE, LOOT_CONTAINERS_FILE, LOOT_GROUP_FILES
     global RECYCLE_FILE
 
@@ -123,6 +125,14 @@ def configure_paths(install_root):
 
     ITEM_FILES = [CONFIG / "items.xml"] + sorted((CONFIG / "Custom").glob("items_*.xml"))
     BLOCK_FILES = [CONFIG / "blocks.xml"] + sorted((CONFIG / "Custom").glob("blocks_*.xml"))
+    # Weapon/armor "mods" (attachments) are a completely separate schema
+    # (<item_modifier>, not <item>/<block>) in their own file -- missed
+    # entirely until JP's 2026-09-06 report that mods like "Launcher Damage
+    # Boost" had no icon: their real CustomIcon/Extends properties were
+    # sitting right there, just never scanned. Both the mod's own file and
+    # the base game's (vanilla mods Undead Legacy doesn't touch) matter.
+    MOD_ITEM_MODIFIERS_FILE = CONFIG / "item_modifiers.xml"
+    BASE_ITEM_MODIFIERS_FILE = SRC / "Data" / "Config" / "item_modifiers.xml"
 
     # Acquisition channels beyond crafting -- see load_acquisition_channels().
     TRADERS_FILE = CONFIG / "traders.xml"
@@ -904,9 +914,16 @@ def load_recycle_data():
 # CustomIcon="ulmElectricWireRelay". Missing "block" here silently dropped
 # ~369 CustomIcon overrides across the dataset (found via user bug report on
 # "Tall Wire Relay").
+#
+# "item_modifier" (weapon/armor mods -- a completely different tag, not a
+# kind of <item>) added per JP's 2026-09-06 report: the backreference
+# `</\1>` still closes correctly whichever alternative actually matched, so
+# this one addition covers <item_modifier> everywhere ITEM_BLOCK_RE is used
+# (CustomIcon AND Extends scanning both, since load_extends_graph() reuses
+# this same regex).
 # ---------------------------------------------------------------------------
 ITEM_BLOCK_RE = re.compile(
-    r"<(item|set|append|block)\s+"
+    r"<(item_modifier|item|set|append|block)\s+"
     r"(?:name=\"([^\"]+)\"|xpath=\"[^\"]*\[@name='([^']+)'\][^\"]*\")"
     r"[^>]*>(.*?)</\1>",
     re.S,
@@ -923,7 +940,7 @@ def load_custom_icons():
     # the real CustomIcon (e.g. quest-reward bundles sharing one "bundleBooks"
     # icon) then only exists in the base game's own items.xml/blocks.xml,
     # which nothing here read before.
-    for path in [BASE_ITEM_FILE, BASE_BLOCK_FILE] + ITEM_FILES + BLOCK_FILES:
+    for path in [BASE_ITEM_FILE, BASE_BLOCK_FILE, BASE_ITEM_MODIFIERS_FILE, MOD_ITEM_MODIFIERS_FILE] + ITEM_FILES + BLOCK_FILES:
         if not path.exists():
             continue
         text = read_text(path)
@@ -1041,7 +1058,7 @@ def load_extends_graph():
     exactly what's missing when the mod itself never re-declares it."""
     extends_map = {}
     children_map = {}
-    for path in [BASE_ITEM_FILE, BASE_BLOCK_FILE] + ITEM_FILES + BLOCK_FILES:
+    for path in [BASE_ITEM_FILE, BASE_BLOCK_FILE, BASE_ITEM_MODIFIERS_FILE, MOD_ITEM_MODIFIERS_FILE] + ITEM_FILES + BLOCK_FILES:
         if not path.exists():
             continue
         text = read_text(path)
@@ -1055,6 +1072,31 @@ def load_extends_graph():
             extends_map[entry_name] = m.group(1)
             children_map.setdefault(m.group(1), []).append(entry_name)
     return extends_map, children_map
+
+
+def load_item_modifier_names():
+    """Every <item_modifier name="X" ...> in both the mod's and the base
+    game's item_modifiers.xml -- weapon/armor mods (attachments) like "Ball
+    Cap Mod" or "Launcher Damage Boost". Some have no acquisition data at
+    all in the sense load_acquisition_channels() tracks (no trader/loot/
+    quest path we parse), so without this they wouldn't be in `all_names`
+    (no icon attempted) or browsable in the app at all -- this is their own
+    dedicated source of truth for "this exists", independent of how you get
+    one."""
+    names = set()
+    for path in (MOD_ITEM_MODIFIERS_FILE, BASE_ITEM_MODIFIERS_FILE):
+        if not path.exists():
+            warn(f"missing expected file: {path}")
+            continue
+        text = read_text(path)
+        for frag in scan_blocks(text, "item_modifier"):
+            el = parse_fragment(frag, path.name)
+            if el is None:
+                continue
+            name = el.attrib.get("name")
+            if name:
+                names.add(name)
+    return names
 
 
 def _shared_prefix_len(a, b):
@@ -1297,6 +1339,11 @@ def main(install_root):
     # icons became obvious.
     all_names |= purchasable | lootable | rewardable
 
+    print("Loading weapon/armor mods (item_modifiers.xml)...")
+    item_mods = load_item_modifier_names()
+    all_names |= item_mods
+    print(f"  {len(item_mods)} distinct mod name(s)")
+
     print("Backfilling display names via Extends chain...")
     extends_map, children_map = load_extends_graph()
     name_fallback_used = []
@@ -1424,6 +1471,7 @@ def main(install_root):
                 "recyclable": len(recyclable),
                 "recycleYieldItems": len(recycle_yields),
                 "recycleSourceRows": sum(len(v) for v in recycle_sources.values()),
+                "itemMods": len(item_mods),
             },
             "unlockBreakdown": unlock_counts,
             "warnings": WARNINGS,
@@ -1434,6 +1482,7 @@ def main(install_root):
         "harvestSources": harvest_sources,
         "recycleYields": recycle_yields,
         "recycleSources": recycle_sources,
+        "itemMods": sorted(item_mods),
         "alwaysAvailableStations": sorted(ALWAYS_AVAILABLE_STATIONS),
         "iconFallbackNames": fallback_used,  # names whose icon is a representative variant, not their own
         "recipes": recipes,

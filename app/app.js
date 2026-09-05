@@ -133,6 +133,11 @@
     ...Object.keys(data.harvestSources || {}),
     ...Object.keys(data.recycleYields || {}),
     ...Object.keys(data.recycleSources || {}),
+    // Weapon/armor mods (item_modifiers.xml) -- some have no acquisition
+    // channel this app tracks at all, so without their own explicit list
+    // they'd be invisible even though they're real, ownable things (found
+    // via JP's report on mods like "Ball Cap Mod" missing entirely).
+    ...(data.itemMods || []),
   ]);
   const itemOnlyNames = new Set(
     [...orphanCandidates].filter(
