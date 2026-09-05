@@ -1,0 +1,12 @@
+# Generated from the user's own local game install by build.py -- never
+# bundled or committed. Every recipient builds their own copy by pointing
+# the app at their own install (see README.md).
+app/data.js
+app/icons/
+
+# Per-machine state: the install path build.py/server.py last used. Not
+# portable between machines, so never shared.
+build/config.local.json
+
+__pycache__/
+*.pyc

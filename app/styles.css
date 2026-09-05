@@ -1,0 +1,823 @@
+:root {
+  --bg: #1b1a17;
+  --panel: #242220;
+  --panel-alt: #2b2925;
+  --border: #3a372f;
+  --text: #e8e3d8;
+  --text-dim: #a89f8d;
+  --accent: #c98f3a;
+  --accent-dim: #7a5a29;
+  --always: #4a9c5f;
+  --direct: #3a7fc9;
+  --direct-dim: #1f4a73;
+  --workstation: #2f8f5c;
+  --workstation-dim: #1c4a30;
+  --station: #c98f3a;
+  --unknown: #a04a4a;
+
+  /* Acquisition tags -- deliberately muted/desaturated versions of these
+     hues, distinct from the sharper kind-theme colors above (--accent,
+     --direct, --workstation) so a badge never reads as if it's making a
+     kind-identity claim; it's just a quiet, secondary fact. */
+  --acq-craftable: #a8763f;
+  --acq-harvestable: #7d6249;
+  --acq-purchasable: #5e7d64;
+  --acq-lootable: #7d6690;
+  --acq-rewardable: #93893f;
+  --acq-recyclable: #5c7896;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+}
+
+header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+
+header h1 {
+  font-size: 18px;
+  margin: 0;
+  color: var(--accent);
+}
+
+.meta-line {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+main {
+  display: flex;
+  height: calc(100vh - 53px);
+}
+
+.panel {
+  overflow-y: auto;
+}
+
+.list-panel {
+  width: 380px;
+  min-width: 280px;
+  border-right: 1px solid var(--border);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-panel {
+  flex: 1;
+  padding: 20px;
+}
+
+.search-wrap {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+#search {
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 28px 8px 10px;
+  border-radius: 4px;
+  font-size: 14px;
+  width: 100%;
+}
+
+/* Sits inside the search box's own right edge (absolutely positioned over
+   the input's reserved padding above) rather than beside it, so it reads as
+   part of the field, not a separate control. Hidden via [hidden] rather than
+   conditionally rendered, so app.js only has to flip one attribute. */
+.search-clear {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.search-clear:hover {
+  background: var(--text-dim);
+  color: var(--bg);
+}
+
+.search-clear[hidden] {
+  display: none;
+}
+
+.filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-btn {
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.filter-btn.active {
+  background: var(--accent-dim);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Per-kind theme: research is blue, workstations are deep green, recipes
+   are the app's burnt orange (--accent) -- all three now follow the same
+   convention (colored border/text at rest, dimmed colored fill when the
+   filter is active) and carry through consistently wherever that kind
+   shows up: filter buttons, the results list, the Unlock Chain, the
+   Workstations panel, and any inline reference to one. */
+.filter-btn[data-filter="recipe"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.filter-btn[data-filter="recipe"].active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.filter-btn[data-filter="research"] {
+  color: var(--direct);
+  border-color: var(--direct);
+}
+.filter-btn[data-filter="research"].active {
+  background: var(--direct-dim);
+  border-color: var(--direct);
+  color: var(--text);
+}
+
+.filter-btn[data-filter="workstation"] {
+  color: var(--workstation);
+  border-color: var(--workstation);
+}
+.filter-btn[data-filter="workstation"].active {
+  background: var(--workstation-dim);
+  border-color: var(--workstation);
+  color: var(--text);
+}
+
+.text-recipe, .result-kind-recipe {
+  color: var(--accent);
+}
+.text-research, .result-kind-research {
+  color: var(--direct);
+}
+.text-workstation, .result-kind-workstation {
+  color: var(--workstation);
+}
+
+/* Selected rows use a dimmed fill of the kind's own color (see below), which
+   reads poorly under kind-colored text of the same hue -- JP's call: keep
+   the ring/chip border colored for identity, but force the name itself
+   back to the normal readable text color whenever its row is selected. */
+.result-row.selected .result-name {
+  color: var(--text);
+}
+
+/* Circular icon ring for a workstation shown as its own distinct thing (the
+   results list) -- skipped wherever it's really just "an item" the way a
+   normal ingredient is (the Ingredient Breakdown's nested tier requirement,
+   the Workstations panel's own rows), per JP's earlier call. Workstations
+   keep the icon-only ring since each tier genuinely is one specific block
+   with its own icon -- unlike research (see .research-chip below), there's
+   no "which icon" ambiguity to solve here. */
+img.icon-ring-workstation {
+  border-radius: 50%;
+  box-sizing: border-box;
+  padding: 1px;
+  border: 2px solid var(--workstation);
+}
+
+/* Research doesn't reliably map to one item/one icon the way a workstation
+   tier does, so the ring moved from "around the icon" to "around the icon
+   AND the name together" -- reading more clearly as "this is a research
+   node, a different kind of thing than the items around it" than a small
+   ring on the icon alone did. Drawn as open-ended rules above and below
+   rather than a closed pill (JP's call): a full border pinched the icon's
+   square corners against the curve on the left, and leaving the ends open
+   sidesteps that entirely instead of just padding around it. */
+.research-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-top: 2px solid var(--direct);
+  border-bottom: 2px solid var(--direct);
+  padding: 2px 8px;
+  color: var(--direct);
+  max-width: 100%;
+}
+/* Inside a results-list row the chip replaces what used to be the icon +
+   .result-name pair directly, so it needs to inherit their role as the
+   flexible, truncatable middle of the row (min-width: 0 is what lets the
+   name's own text-overflow: ellipsis kick in inside a flex child). */
+.result-row .research-chip {
+  flex: 1;
+  min-width: 0;
+}
+.research-chip-large {
+  gap: 8px;
+  padding: 3px 12px;
+}
+
+.results {
+  overflow-y: auto;
+  flex: 1;
+  /* Without this, a flex item's default min-height:auto sizes it to its
+     content instead of letting it shrink -- so once the totals panel below
+     grows tall, the results list would refuse to give up space and push the
+     whole sidebar taller than the viewport instead of scrolling internally. */
+  min-height: 0;
+}
+
+/* One-Time Totals lives here, pinned under the results list, rather than at
+   the bottom of the report -- it's a running summary worth keeping visible
+   while browsing, not something to scroll all the way down for. Empty (no
+   report open yet) renders as nothing, so it doesn't eat space up front.
+   Grows with its content (JP's call) up to 75% of the viewport height, at
+   which point it scrolls internally rather than crowding out the results
+   list entirely. */
+.totals-panel {
+  flex-shrink: 0;
+  max-height: 75vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.totals-panel:empty {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+}
+.totals-panel .variant-card {
+  margin-bottom: 0;
+}
+/* .section-label's base top margin (16px, meant for spacing below other
+   content) reads as an oversized gap here, where it's the first thing in
+   the card -- per JP's call, the gap above the title should feel about the
+   same as the card's own left padding rather than towering over it. */
+.totals-panel .section-label {
+  margin-top: 0;
+}
+
+.result-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.result-row:hover {
+  background: var(--panel-alt);
+}
+
+.result-row.selected {
+  background: var(--accent-dim);
+}
+.result-row-research.selected {
+  background: var(--direct-dim);
+}
+.result-row-workstation.selected {
+  background: var(--workstation-dim);
+}
+
+.result-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  flex-shrink: 0;
+  background: var(--panel-alt);
+  border-radius: 3px;
+}
+
+.result-icon.placeholder {
+  visibility: hidden;
+}
+
+.result-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.result-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  letter-spacing: 0.03em;
+}
+
+.variant-count {
+  font-size: 10px;
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  padding: 1px 6px;
+}
+
+.detail-empty {
+  color: var(--text-dim);
+  margin-top: 40px;
+  text-align: center;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.detail-icon {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  background: var(--panel-alt);
+  border-radius: 4px;
+}
+
+.detail-title {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+
+.variant-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.variant-card h3 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.kv-row {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.kv-row .k {
+  color: var(--text-dim);
+  min-width: 100px;
+}
+
+.ingredient-list {
+  list-style: none;
+  margin: 6px 0 0 0;
+  padding: 0;
+}
+
+.ingredient-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.ing-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.ing-icon-placeholder {
+  visibility: hidden;
+}
+
+/* Fixed width + right-aligned so a row's name always starts at the same x
+   position regardless of how many digits its quantity has -- per JP's call,
+   "400x" was pushing its name further right than "1x" on a sibling row. */
+.ing-count {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+  min-width: 3.2em;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.ing-name {
+  cursor: pointer;
+}
+
+.ing-name:hover {
+  text-decoration: underline;
+  color: var(--accent);
+}
+
+.section-label {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 16px 0 6px 0;
+}
+
+.warning-note {
+  color: var(--unknown);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+/* Acquisition tags (recyclable/craftable/harvestable/purchasable/lootable/
+   rewardable): each gets its own muted color (see --acq-* above) so they're
+   quickly distinguishable from one another, but all stay outline-only
+   against the same neutral fill -- subtle on purpose, since these are a
+   secondary fact about an item, not a kind identity the way the
+   blue/green/orange theme colors are. */
+.acq-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  margin: 0 4px 2px 0;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.acq-badge-craftable { border-color: var(--acq-craftable); color: var(--acq-craftable); }
+.acq-badge-harvestable { border-color: var(--acq-harvestable); color: var(--acq-harvestable); }
+.acq-badge-purchasable { border-color: var(--acq-purchasable); color: var(--acq-purchasable); }
+.acq-badge-lootable { border-color: var(--acq-lootable); color: var(--acq-lootable); }
+.acq-badge-rewardable { border-color: var(--acq-rewardable); color: var(--acq-rewardable); }
+.acq-badge-recyclable { border-color: var(--acq-recyclable); color: var(--acq-recyclable); }
+
+/* Harvest and Recycle are the two badges that are ever interactive (see the
+   shared source modal below) -- a filled hover state instead of just a
+   cursor change, so each reads as clickable rather than looking broken.
+   Each badge type's hover fills with ITS OWN color (not a single hardcoded
+   one), since there's more than one clickable channel now. */
+.acq-badge-clickable {
+  cursor: pointer;
+}
+.acq-badge-harvestable.acq-badge-clickable:hover {
+  background: var(--acq-harvestable);
+  color: var(--bg);
+}
+.acq-badge-recyclable.acq-badge-clickable:hover {
+  background: var(--acq-recyclable);
+  color: var(--bg);
+}
+
+/* Pushes a name's acquisition badges to the right edge of whatever flex row
+   they land in (the title row, an ingredient row, a tool row, ...) instead
+   of trailing directly after the name -- per JP's call, so the name itself
+   reads clearly instead of competing with a run of badges right next to it. */
+.acq-badges {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+
+/* ---------------------------------------------------------------------
+   Total Requirements Report
+   --------------------------------------------------------------------- */
+
+.report-controls {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.report-controls input,
+.report-controls select {
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  margin-left: 4px;
+}
+
+.report-controls input[type="number"] {
+  width: 70px;
+}
+
+.req-tree {
+  list-style: none;
+  margin: 4px 0 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+}
+
+.req-tree-root {
+  padding-left: 0;
+}
+
+.req-tree li {
+  padding: 3px 0;
+}
+
+/* Expand/collapse row: a plain clickable div, not a native <details>/
+   <summary> -- real mouse clicks stopped reaching <summary>'s native toggle
+   once it had flex/flex-wrap styling (reproduced directly: pixel-perfect
+   clicks with no overlapping element still left `.open` false), so state is
+   driven entirely by a click handler instead of the browser's own
+   disclosure widget. Also a bigger, unambiguous target either way -- the
+   whole row toggles, not just a 10px glyph. */
+.req-toggle {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+
+.req-toggle:hover {
+  background: var(--panel-alt);
+}
+
+.req-caret {
+  display: inline-block;
+  color: var(--text-dim);
+  font-size: 10px;
+  width: 10px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+/* An always-shown, non-toggleable grouping row (an upgrade step's own
+   label) -- same layout as .req-toggle, minus the pointer/hover affordance
+   since there's nothing to click. */
+.req-row-static {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+
+.req-leaf {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+
+/* Matches the width/gap of a details>summary's expand triangle (below) so a
+   leaf row's icon lines up with an expandable row's icon at the same depth
+   -- without implying the leaf is itself clickable to expand. */
+.req-leaf::before {
+  content: "\2013";
+  color: var(--text-dim);
+  font-size: 10px;
+  width: 10px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.req-dim {
+  color: var(--text-dim);
+}
+
+.req-flag {
+  color: var(--unknown);
+  font-size: 11px;
+}
+
+.req-flag-dim {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------------
+   Harvest sources modal -- opened from an item's Harvest acquisition
+   badge, rendering the pre-built block/count/chance list from
+   data.harvestSources (see build.py's load_harvest_sources). A simple
+   centered overlay rather than an anchored popover: the badge appears in
+   several different flex contexts (title row, ingredient rows, totals
+   panel), so a popover would need per-context edge-collision handling for
+   little benefit over a modal.
+   --------------------------------------------------------------------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal-overlay[hidden] {
+  display: none;
+}
+
+.modal-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: min(480px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+  font-weight: 600;
+  /* Neutral rather than one channel's color -- this modal is shared between
+     Harvest and Recycle (and possibly more later), so the title itself
+     doesn't commit to either one's hue; the tier labels below it still
+     carry the high/medium/low color coding. */
+  color: var(--text);
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0 0 12px;
+}
+
+.modal-close:hover {
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 12px 16px;
+  overflow-y: auto;
+}
+
+/* High/medium/low is relative to the best source for THIS item (see
+   build.py's load_harvest_sources / load_recycle_data), not an absolute
+   scale -- colors reuse the theme's existing semantic greens/reds rather
+   than introducing new ones, since "good/notable/skip" is exactly what
+   those already mean elsewhere in the app. Shared by the Harvest and
+   Recycle source modals. */
+.source-tier-label {
+  margin-top: 14px;
+}
+.source-tier-label:first-child {
+  margin-top: 0;
+}
+.source-tier-label-high { color: var(--always); }
+.source-tier-label-medium { color: var(--accent); }
+.source-tier-label-low { color: var(--unknown); }
+
+/* Matches .acq-badges' own convention (margin-left: auto) rather than
+   justify-content on the row, so it lines up the same way every other
+   trailing-right-side annotation in the app does. Shared by the Harvest/
+   Recycle source modals and the Recycles Into card. */
+.source-row-meta {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  padding-left: 8px;
+}
+
+/* ---------------------------------------------------------------------
+   Build setup/rebuild + in-app warnings
+   --------------------------------------------------------------------- */
+
+.rebuild-btn {
+  margin-left: auto;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.rebuild-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+/* Styled as a plain inline link rather than a button -- it's part of a
+   sentence in the meta line, not a standalone action. Reuses --unknown
+   (the app's existing "something's off" color) rather than a new hue. */
+.meta-warnings-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--unknown);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.build-intro {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.build-intro code {
+  color: var(--text);
+}
+
+#build-form {
+  display: flex;
+  gap: 8px;
+}
+#build-path-input {
+  flex: 1;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+#build-submit {
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#build-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.build-error {
+  color: var(--unknown);
+  font-size: 13px;
+  margin-top: 10px;
+}
+.build-status {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin-top: 10px;
+}
+.build-log {
+  margin-top: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+}
+.build-log:empty {
+  display: none;
+}
+
+.warnings-list li {
+  align-items: flex-start;
+}
+

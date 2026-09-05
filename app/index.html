@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Undead Legacy Cookbook</title>
+<link rel="stylesheet" href="styles.css?dev=18">
+</head>
+<body>
+<header>
+  <h1>Undead Legacy Cookbook</h1>
+  <div id="meta-line" class="meta-line"></div>
+  <button id="rebuild-btn" class="rebuild-btn" type="button" hidden
+          title="Re-run the data build (e.g. after a mod update)">Rebuild data</button>
+</header>
+
+<main>
+  <section class="panel list-panel">
+    <div class="search-wrap">
+      <input id="search" type="text" placeholder="Search recipes, research, upgrades..." autocomplete="off">
+      <button id="search-clear" class="search-clear" type="button" title="Clear search" aria-label="Clear search" hidden>&times;</button>
+    </div>
+    <div id="filters" class="filters"></div>
+    <div id="results" class="results"></div>
+    <div id="totals-panel" class="totals-panel"></div>
+  </section>
+
+  <section class="panel detail-panel">
+    <div id="detail" class="detail-empty">Select an item on the left to see its recipe, research, and unlock details.</div>
+  </section>
+</main>
+
+<!-- Shared by "Harvest Sources" and "Recycle Sources" -- both are the same
+     "here's everything that yields this item" shape, just from a different
+     acquisition channel, so one modal component renders both. -->
+<div id="source-modal" class="modal-overlay" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <span id="source-modal-title"></span>
+      <button id="source-modal-close" class="modal-close" type="button" title="Close" aria-label="Close">&times;</button>
+    </div>
+    <div id="source-modal-body" class="modal-body"></div>
+  </div>
+</div>
+
+<div id="build-modal" class="modal-overlay" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <span>Build Cookbook Data</span>
+      <button id="build-cancel" class="modal-close" type="button" title="Cancel" aria-label="Cancel" hidden>&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="build-intro">Point this at your 7 Days To Die install folder (the one
+        containing <code>Mods\UndeadLegacy</code> and <code>Data</code>) to (re)build
+        the local dataset from it. Nothing is ever uploaded -- everything happens on
+        your own machine.</p>
+      <form id="build-form">
+        <input id="build-path-input" type="text" placeholder="C:\7D2D\Custom\Undead_22" autocomplete="off" spellcheck="false">
+        <button id="build-submit" type="submit">Build</button>
+      </form>
+      <div id="build-error" class="build-error" hidden></div>
+      <div id="build-status" class="build-status"></div>
+      <pre id="build-log" class="build-log"></pre>
+    </div>
+  </div>
+</div>
+
+<!-- dev note: the ?dev=N query strings below are a cache-buster for local
+     testing only (the app's own script tags don't otherwise change); bump N
+     whenever a stale browser cache serves an old copy of one of these
+     mid-session. Harmless to ship, but fine to drop before a real release. -->
+<script src="data.js?dev=9"></script>
+<script src="reportEngine.js?dev=4"></script>
+<script src="setup.js?dev=1"></script>
+<script src="app.js?dev=30"></script>
+</body>
+</html>
