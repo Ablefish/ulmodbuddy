@@ -121,11 +121,30 @@
     return info && info.tierIndex === 0 && !/\(Tier \d+\)/.test(base) ? `${base} (Tier 1)` : base;
   }
 
+  // Anything with real acquisition/harvest/recycle data but no recipe,
+  // research, or workstation identity of its own -- e.g. a "Desktop PC"
+  // that's only ever a Recycler *output*, never craftable, researchable, or
+  // buildable. Without this, such a name had data but no page: unsearchable
+  // (never in `index` below), and unclickable everywhere it showed up as an
+  // ingredient (see isKnownName/jumpSpan) -- found via JP's 2026-09-06
+  // report that a known-to-exist recycle item was nowhere to be found.
+  const orphanCandidates = new Set([
+    ...Object.keys(data.acquisition || {}),
+    ...Object.keys(data.harvestSources || {}),
+    ...Object.keys(data.recycleYields || {}),
+    ...Object.keys(data.recycleSources || {}),
+  ]);
+  const itemOnlyNames = new Set(
+    [...orphanCandidates].filter(
+      (name) => !stationFamilyNames.has(name) && !data.recipesByName[name] && !data.research[name]
+    )
+  );
+
   const isKnownName = (name) =>
-    !!(stationFamilyNames.has(name) || data.recipesByName[name] || data.research[name]);
+    !!(stationFamilyNames.has(name) || data.recipesByName[name] || data.research[name] || itemOnlyNames.has(name));
 
   // ---------------------------------------------------------------------
-  // Build a flat searchable index: one entry per item name, kind = recipe/research/workstation.
+  // Build a flat searchable index: one entry per item name, kind = recipe/research/workstation/item.
   // A name can be more than one kind at once (e.g. a recipe whose output is also a research node name).
   // ---------------------------------------------------------------------
   const index = [];
@@ -138,6 +157,9 @@
   }
   for (const name of stationFamilyNames) {
     index.push({ name, kind: "workstation" });
+  }
+  for (const name of itemOnlyNames) {
+    index.push({ name, kind: "item" });
   }
   index.sort((a, b) => {
     const la = a.kind === "workstation" ? workstationDisplayName(a.name) : displayName(a.name);
@@ -153,6 +175,7 @@
     { key: "recipe", label: "Recipes" },
     { key: "research", label: "Research" },
     { key: "workstation", label: "Workstations" },
+    { key: "item", label: "Items" },
   ];
   filtersEl.innerHTML = FILTERS.map(
     (f) => `<button class="filter-btn${f.key === activeFilter ? " active" : ""}" data-filter="${f.key}">${f.label}</button>`
@@ -266,6 +289,7 @@
     if (stationFamilyNames.has(name)) selectByKey("workstation:" + name);
     else if (data.recipesByName[name]) selectByKey("recipe:" + name);
     else if (data.research[name]) selectByKey("research:" + name);
+    else if (itemOnlyNames.has(name)) selectByKey("item:" + name);
   };
 
   // "Where do I get this" source modal -- shared by Harvest Sources
@@ -1052,7 +1076,15 @@
       }
     }
 
-    html += `<div class="req-flag-dim" style="margin-bottom:14px;">Click the &#9656; triangle on any craftable ingredient, workstation, or research step to say &ldquo;I'll make this myself&rdquo; and see its own cost &mdash; collapsed items are assumed already on hand (bought, looted, harvested, or already researched/built).</div>`;
+    // "item" kind (a name with real acquisition/harvest/recycle data but no
+    // recipe/research/workstation identity of its own -- see itemOnlyNames)
+    // never has anything expandable, so this hint and the Crafting
+    // Cost/Research Required/Workstations/Tools sections below (all about
+    // requirements for MAKING something) would just be noise; only the
+    // header's acquisition badges and Recycles Into apply.
+    if (kind !== "item") {
+      html += `<div class="req-flag-dim" style="margin-bottom:14px;">Click the &#9656; triangle on any craftable ingredient, workstation, or research step to say &ldquo;I'll make this myself&rdquo; and see its own cost &mdash; collapsed items are assumed already on hand (bought, looted, harvested, or already researched/built).</div>`;
+    }
 
     // Section 1 -- crafting cost: ingredient edges only, counting only what's
     // currently expanded. Applies to a recipe (quantity multiplies through)
@@ -1084,13 +1116,18 @@
     // Section 2 -- one-time research/workstation/tool investment: each part
     // gets its own header with a live count instead of one shared
     // "Research & Workstations" umbrella, since they answer independent
-    // questions once you're actually deciding what you still need.
-    html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Research Required${report.researchCount ? ` (${report.researchCount})` : ""}</div>`;
-    html += renderUnlockChainCard(report);
-    html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Workstations${report.workstationNodes.length ? ` (${report.workstationNodes.length})` : ""}</div>`;
-    html += renderWorkstationsCard(report);
-    html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Tools${report.toolNodes.length ? ` (${report.toolNodes.length})` : ""}</div>`;
-    html += renderToolsCard(report);
+    // questions once you're actually deciding what you still need. Not
+    // meaningful for a bare "item" (see above) -- skipped entirely rather
+    // than shown empty/misleading (e.g. "Always unlocked" reads oddly for
+    // something that was never lockable in the first place).
+    if (kind !== "item") {
+      html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Research Required${report.researchCount ? ` (${report.researchCount})` : ""}</div>`;
+      html += renderUnlockChainCard(report);
+      html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Workstations${report.workstationNodes.length ? ` (${report.workstationNodes.length})` : ""}</div>`;
+      html += renderWorkstationsCard(report);
+      html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Tools${report.toolNodes.length ? ` (${report.toolNodes.length})` : ""}</div>`;
+      html += renderToolsCard(report);
+    }
 
     const recycleOutputs = data.recycleYields && data.recycleYields[name];
     html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Recycles Into${recycleOutputs ? ` (${recycleOutputs.length})` : ""}</div>`;

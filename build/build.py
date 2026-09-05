@@ -47,6 +47,7 @@ SRC = MOD_ROOT = CONFIG = ATLASES = None
 RECIPE_FILES = UPGRADE_FILE = RESEARCH_FILE = None
 LOCALIZATION_FILE = BASE_LOCALIZATION_FILE = BASE_ICONS_DIR = None
 ITEM_FILES = BLOCK_FILES = None
+BASE_ITEM_FILE = BASE_BLOCK_FILE = None
 TRADERS_FILE = QUESTS_FILE = LOOT_CONTAINERS_FILE = LOOT_GROUP_FILES = None
 RECYCLE_FILE = None
 
@@ -84,7 +85,7 @@ def configure_paths(install_root):
     global SRC, MOD_ROOT, CONFIG, ATLASES
     global RECIPE_FILES, UPGRADE_FILE, RESEARCH_FILE
     global LOCALIZATION_FILE, BASE_LOCALIZATION_FILE, BASE_ICONS_DIR
-    global ITEM_FILES, BLOCK_FILES
+    global ITEM_FILES, BLOCK_FILES, BASE_ITEM_FILE, BASE_BLOCK_FILE
     global TRADERS_FILE, QUESTS_FILE, LOOT_CONTAINERS_FILE, LOOT_GROUP_FILES
     global RECYCLE_FILE
 
@@ -107,12 +108,18 @@ def configure_paths(install_root):
     # see load_localization() for the mod-first merge.
     BASE_LOCALIZATION_FILE = SRC / "Data" / "Config" / "Localization.txt"
     # Same gap, for icons: vanilla items the mod never gives a CustomIcon
-    # override have no icon anywhere in the mod's own UIAtlases either -- in
-    # game they render via the base item's Extends chain, which this build
-    # doesn't simulate. The base game ships each item's icon as an
-    # individual PNG (named by internal item name), already extracted, flat,
-    # directly under the install -- no caching/copy step needed.
+    # override have no icon anywhere in the mod's own UIAtlases either. The
+    # base game ships each item's icon as an individual PNG (named by
+    # internal item name), already extracted, flat, directly under the
+    # install -- no caching/copy step needed. When even THAT own-name lookup
+    # misses (the mod patches a vanilla item's description/effects but keeps
+    # its original Extends-inherited icon, e.g. a renamed perk book), the
+    # base game's own items.xml/blocks.xml Extends chain is walked as a
+    # last resort -- see load_extends_graph() and the fifth tier in
+    # resolve_icon_with_variant_fallback().
     BASE_ICONS_DIR = SRC / "Data" / "ItemIcons"
+    BASE_ITEM_FILE = SRC / "Data" / "Config" / "items.xml"
+    BASE_BLOCK_FILE = SRC / "Data" / "Config" / "blocks.xml"
 
     ITEM_FILES = [CONFIG / "items.xml"] + sorted((CONFIG / "Custom").glob("items_*.xml"))
     BLOCK_FILES = [CONFIG / "blocks.xml"] + sorted((CONFIG / "Custom").glob("blocks_*.xml"))
@@ -908,7 +915,15 @@ ITEM_BLOCK_RE = re.compile(
 
 def load_custom_icons():
     custom_icons = {}
-    for path in ITEM_FILES + BLOCK_FILES:
+    # Base game files scanned FIRST, mod files LAST -- a later dict write
+    # wins on the same key, so a CustomIcon the mod itself declares always
+    # overrides the base game's (the "mod has final say" precedence used
+    # everywhere else). Base game files are included at all because the mod
+    # frequently patches a vanilla item without touching its icon setup --
+    # the real CustomIcon (e.g. quest-reward bundles sharing one "bundleBooks"
+    # icon) then only exists in the base game's own items.xml/blocks.xml,
+    # which nothing here read before.
+    for path in [BASE_ITEM_FILE, BASE_BLOCK_FILE] + ITEM_FILES + BLOCK_FILES:
         if not path.exists():
             continue
         text = read_text(path)
@@ -1015,23 +1030,30 @@ def load_variant_helper_candidates():
 # invent names.
 # ---------------------------------------------------------------------------
 def load_extends_graph():
-    """Returns (extends_map, children_map): every block's own `Extends`
-    property target, and the reverse (parent -> children)."""
+    """Returns (extends_map, children_map): every item/block's own `Extends`
+    property target, and the reverse (parent -> children). Scans items too,
+    not just blocks (ITEM_BLOCK_RE, not the block-only BLOCK_TAG_RE) --
+    Undead Legacy often patches a vanilla ITEM's description/effects without
+    touching its icon, so the icon-inheriting Extends link (e.g. a renamed
+    perk book Extending the vanilla book whose icon it actually uses) lives
+    on an <item>, not a <block>. Scans the base game's own items.xml/
+    blocks.xml too, alongside the mod's -- that vanilla Extends link is
+    exactly what's missing when the mod itself never re-declares it."""
     extends_map = {}
     children_map = {}
-    for path in BLOCK_FILES:
+    for path in [BASE_ITEM_FILE, BASE_BLOCK_FILE] + ITEM_FILES + BLOCK_FILES:
         if not path.exists():
             continue
         text = read_text(path)
-        for tag, name_a, name_b, body in BLOCK_TAG_RE.findall(text):
-            block_name = name_a or name_b
-            if not block_name:
+        for tag, name_a, name_b, body in ITEM_BLOCK_RE.findall(text):
+            entry_name = name_a or name_b
+            if not entry_name:
                 continue
             m = re.search(r'<property name="Extends" value="([^"]*)"', body)
             if not m or not m.group(1):
                 continue
-            extends_map[block_name] = m.group(1)
-            children_map.setdefault(m.group(1), []).append(block_name)
+            extends_map[entry_name] = m.group(1)
+            children_map.setdefault(m.group(1), []).append(entry_name)
     return extends_map, children_map
 
 
@@ -1118,22 +1140,30 @@ def _variant_candidates(name, variant_helper_candidates):
 
 
 def resolve_icon_with_variant_fallback(name, icon_index, custom_icons, used_icons,
-                                        variant_helper_candidates, base_icon_index):
+                                        variant_helper_candidates, base_icon_index,
+                                        extends_map=None, _seen=None):
     """Returns (rel_path_or_None, source) where source is "variant" (a
     representative placeable skin, or a same-naming-convention guess --
-    shown with a transparency note in the app) or "base_game" (the item's
-    own real icon, just sourced from the base game rather than the mod --
-    no caveat needed), or None if resolved directly from the mod's own
-    atlases / not resolved at all.
+    shown with a transparency note in the app), "base_game" (the item's own
+    real icon, just sourced from the base game rather than the mod -- no
+    caveat needed), or "extends" (borrowed from a named Extends ancestor --
+    see tier 5), or None if resolved directly from the mod's own atlases /
+    not resolved at all.
 
-    Four tiers, in order: (1) this item's own mod icon; (2) a variant-helper
+    Five tiers, in order: (1) this item's own mod icon; (2) a variant-helper
     skin's mod icon (CanPickup-registered, or a "<X>VariantHelper" naming
     guess -- see _variant_candidates); (3) this item's own base-game icon;
     (4) a variant-helper skin's base-game icon -- needed for helpers whose
     real skin is itself a vanilla item the mod never gave an icon override
     (e.g. the Bedroll: the "bedrollBlockVariantHelper" token's real skin is
     the "bedroll" block, which has no mod icon of its own either, only a
-    base-game one)."""
+    base-game one); (5) nothing of its own anywhere, but it Extends a named
+    ancestor whose icon it actually renders with in-game -- e.g. Undead
+    Legacy patches a vanilla perk book's description/effects without ever
+    touching its icon, so the book keeps using its Extends-inherited vanilla
+    icon, which only load_extends_graph() (now scanning the base game's own
+    items.xml/blocks.xml too) can find. Recurses up the chain, since an
+    ancestor can itself need any of tiers 1-4 to resolve."""
     rel = resolve_icon(name, icon_index, custom_icons, used_icons)
     if rel is not None:
         return rel, None
@@ -1149,6 +1179,16 @@ def resolve_icon_with_variant_fallback(name, icon_index, custom_icons, used_icon
         rel = resolve_icon(candidate, base_icon_index, custom_icons, used_icons)
         if rel is not None:
             return rel, "variant_base_game"
+    if extends_map:
+        seen = _seen or {name}
+        parent = extends_map.get(name)
+        if parent and parent not in seen:
+            rel, _source = resolve_icon_with_variant_fallback(
+                parent, icon_index, custom_icons, used_icons,
+                variant_helper_candidates, base_icon_index, extends_map, seen | {parent}
+            )
+            if rel is not None:
+                return rel, "extends"
     return None, None
 
 
@@ -1247,6 +1287,15 @@ def main(install_root):
         all_names.add(name)
         for o in sources:
             all_names.add(o["name"])
+    # Anything ONLY ever reachable by buying/looting/quest-reward (never a
+    # recipe ingredient/output, harvest source, or recycle name) was never
+    # folded into all_names before -- so vehicles, perk books, and loot
+    # bundles (all mostly purchasable/lootable/rewardable-only) never got an
+    # icon lookup attempted at all, even when a perfectly good one exists in
+    # an atlas. Found via JP's 2026-09-06 report after the "item" browsing
+    # kind made these names visible for the first time and their missing
+    # icons became obvious.
+    all_names |= purchasable | lootable | rewardable
 
     print("Backfilling display names via Extends chain...")
     extends_map, children_map = load_extends_graph()
@@ -1269,9 +1318,10 @@ def main(install_root):
 
     fallback_used = []
     base_game_used = []
+    extends_used = []
     for nm in all_names:
         rel, source = resolve_icon_with_variant_fallback(
-            nm, icon_index, custom_icons, used_icons, variant_helper_candidates, base_icon_index
+            nm, icon_index, custom_icons, used_icons, variant_helper_candidates, base_icon_index, extends_map
         )
         if rel:
             icons[nm] = rel
@@ -1279,8 +1329,11 @@ def main(install_root):
                 fallback_used.append(nm)
             elif source == "base_game":
                 base_game_used.append(nm)
+            elif source == "extends":
+                extends_used.append(nm)
     print(f"  {len(icons)} icons resolved of {len(all_names)} distinct names "
-          f"({len(fallback_used)} via variant-skin fallback, {len(base_game_used)} via base-game icon)")
+          f"({len(fallback_used)} via variant-skin fallback, {len(base_game_used)} via base-game icon, "
+          f"{len(extends_used)} via Extends ancestor)")
     if fallback_used:
         warn(
             f"{len(fallback_used)} name(s) have no icon of their own -- they are "
@@ -1294,6 +1347,11 @@ def main(install_root):
         print(
             f"  {len(base_game_used)} icon(s) resolved from the base game's own "
             f"Data/ItemIcons (vanilla items the mod never gives a CustomIcon override)"
+        )
+    if extends_used:
+        print(
+            f"  {len(extends_used)} icon(s) borrowed from a named Extends ancestor "
+            f"(the mod patches the item without touching its inherited icon)"
         )
 
     print("Copying referenced icon files...")
@@ -1359,6 +1417,7 @@ def main(install_root):
                 "harvestable": len(harvestable),
                 "harvestSourceRows": sum(len(v) for v in harvest_sources.values()),
                 "nameFallbackUsed": len(name_fallback_used),
+                "iconExtendsFallbackUsed": len(extends_used),
                 "purchasable": len(purchasable),
                 "lootable": len(lootable),
                 "rewardable": len(rewardable),
