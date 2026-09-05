@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local server for the Cookbook app.
+"""Local server for the UL Mod Buddy app.
 
 Serves the static app (same no-cache behavior as a plain dev server always
 had) AND powers the in-app "point me at your install" build flow: the app
@@ -29,7 +29,7 @@ import build as build_module  # noqa: E402  (path must be set up first)
 _build_lock = threading.Lock()
 
 
-class CookbookRequestHandler(SimpleHTTPRequestHandler):
+class ULModBuddyRequestHandler(SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
@@ -91,5 +91,5 @@ class CookbookRequestHandler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8420
-    print(f"Cookbook server running at http://localhost:{port}")
-    ThreadingHTTPServer(("", port), CookbookRequestHandler).serve_forever()
+    print(f"UL Mod Buddy server running at http://localhost:{port}")
+    ThreadingHTTPServer(("", port), ULModBuddyRequestHandler).serve_forever()

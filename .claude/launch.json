@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "cookbook-app",
+      "name": "ulmodbuddy-app",
       "runtimeExecutable": "py",
       "runtimeArgs": ["app/server.py", "8420"],
       "port": 8420

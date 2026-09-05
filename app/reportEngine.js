@@ -1,4 +1,4 @@
-// Undead Legacy Cookbook -- Total Requirements Report engine, v2.
+// UL Mod Buddy -- Total Requirements Report engine, v2.
 //
 // Pure logic, no DOM dependency, so it can be loaded in the browser app AND
 // required directly under Node for automated verification against a real
@@ -32,7 +32,7 @@
   if (typeof module === "object" && module.exports) {
     module.exports = factory();
   } else {
-    root.CookbookReportEngine = factory();
+    root.ULModBuddyReportEngine = factory();
   }
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";

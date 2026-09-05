@@ -1,4 +1,4 @@
-# Undead Legacy Cookbook
+# UL Mod Buddy
 
 A browsable recipe/research/workstation reference for the [Undead Legacy](http://ul.subquake.com)
 mod for *7 Days to Die*. Search for any craftable item, research topic, or

@@ -1,4 +1,4 @@
-// Undead Legacy Cookbook -- minimal proof-of-life app shell, now with the
+// UL Mod Buddy -- minimal proof-of-life app shell, now with the
 // Total Requirements Report (recursive dependency expansion) as the first
 // real Phase-1 feature. See reportEngine.js for the pure recursion logic;
 // this file is just data plumbing + rendering + DOM wiring.
@@ -6,19 +6,19 @@
 (function () {
   "use strict";
 
-  const data = window.COOKBOOK_DATA;
+  const data = window.ULMODBUDDY_DATA;
   if (!data) {
     // setup.js (loaded just before this file) already opened the build
-    // modal in no-cancel mode when it saw window.COOKBOOK_DATA was unset --
+    // modal in no-cancel mode when it saw window.ULMODBUDDY_DATA was unset --
     // nothing else to do here until that finishes.
     return;
   }
-  if (!window.CookbookReportEngine) {
+  if (!window.ULModBuddyReportEngine) {
     document.getElementById("detail").textContent =
       "reportEngine.js did not load -- is it included in index.html alongside app.js?";
     return;
   }
-  const reportEngine = window.CookbookReportEngine.createReportEngine(data);
+  const reportEngine = window.ULModBuddyReportEngine.createReportEngine(data);
 
   const $ = (sel) => document.querySelector(sel);
   const searchEl = $("#search");
@@ -46,7 +46,7 @@
   metaEl.innerHTML = metaHtml;
 
   rebuildBtnEl.hidden = false;
-  rebuildBtnEl.addEventListener("click", () => window.CookbookSetup.open({ allowCancel: true }));
+  rebuildBtnEl.addEventListener("click", () => window.ULModBuddySetup.open({ allowCancel: true }));
 
   const displayName = (internalName) => {
     if (!internalName) return internalName;

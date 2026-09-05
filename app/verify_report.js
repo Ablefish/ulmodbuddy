@@ -6,7 +6,7 @@ const path = require("path");
 const dataPath = path.join(__dirname, "data.js");
 let src = fs.readFileSync(dataPath, "utf8");
 src = src.replace(/^\/\/.*$/m, "").trim();
-src = src.replace(/^window\.COOKBOOK_DATA\s*=\s*/, "").replace(/;\s*$/, "");
+src = src.replace(/^window\.ULMODBUDDY_DATA\s*=\s*/, "").replace(/;\s*$/, "");
 const data = JSON.parse(src);
 
 const { createReportEngine } = require("./reportEngine.js");

@@ -1,10 +1,10 @@
-// Cookbook build-setup flow -- the "point me at your install" modal.
+// UL Mod Buddy build-setup flow -- the "point me at your install" modal.
 //
 // A fresh checkout of this repo ships with no data.js at all (see the repo
 // README: no mod content is ever bundled). This file owns everything about
 // getting that data built: it opens automatically (with no way to cancel,
-// since there's nothing usable behind it yet) when window.COOKBOOK_DATA is
-// missing, and exposes window.CookbookSetup.open({allowCancel}) so app.js
+// since there's nothing usable behind it yet) when window.ULMODBUDDY_DATA is
+// missing, and exposes window.ULModBuddySetup.open({allowCancel}) so app.js
 // can reopen the same modal later from its "Rebuild data" button. Loaded
 // before app.js -- see index.html's script order.
 (function () {
@@ -110,9 +110,9 @@
       });
   });
 
-  window.CookbookSetup = { open };
+  window.ULModBuddySetup = { open };
 
-  if (!window.COOKBOOK_DATA) {
+  if (!window.ULMODBUDDY_DATA) {
     open({ allowCancel: false });
   }
 })();
