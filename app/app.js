@@ -57,19 +57,20 @@
   const iconFallbackNames = new Set(data.iconFallbackNames || []);
   const isIconFallback = (internalName) => iconFallbackNames.has(internalName);
 
-  // A research node doesn't always have its own icon (unlike a recipe or a
-  // workstation tier, which are each one specific item/block): try its own
-  // name, then the symbol_X sprite its own `icon` attribute names, then --
-  // per JP's call -- borrow whichever of its own ingredients has one, so a
-  // node without direct art still shows something representative rather
-  // than a blank slot.
+  // A research node's own symbol_X sprite (its `icon` attribute) is what the
+  // game's research tree UI actually shows for that node, so it takes
+  // priority even when the node's name happens to also resolve to an item's
+  // own icon. Only when a node has no symbol (about a third don't) do we
+  // fall back to its own name, then -- per JP's call -- to whichever of its
+  // own ingredients has an icon, so a node without direct art still shows
+  // something representative rather than a blank slot.
   function iconForResearch(name) {
+    const node = data.research[name];
+    const symbolIcon = node && node.icon ? iconFor(node.icon.split(";")[0]) : null;
+    if (symbolIcon) return symbolIcon;
     const direct = iconFor(name);
     if (direct) return direct;
-    const node = data.research[name];
     if (!node) return null;
-    const symbolIcon = node.icon ? iconFor(node.icon.split(";")[0]) : null;
-    if (symbolIcon) return symbolIcon;
     for (const ing of node.ingredients || []) {
       if (ing.name) {
         const ingIcon = iconFor(ing.name);
@@ -1134,9 +1135,14 @@
       html += renderToolsCard(report);
     }
 
-    const recycleOutputs = data.recycleYields && data.recycleYields[name];
-    html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Recycles Into${recycleOutputs ? ` (${recycleOutputs.length})` : ""}</div>`;
-    html += renderRecycleYieldsCard(name);
+    // A research node isn't itself a recyclable item -- it just happens to
+    // share its internal name with the item/recipe it unlocks, which is
+    // where any recycleYields entry for that name actually belongs.
+    if (kind !== "research") {
+      const recycleOutputs = data.recycleYields && data.recycleYields[name];
+      html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Recycles Into${recycleOutputs ? ` (${recycleOutputs.length})` : ""}</div>`;
+      html += renderRecycleYieldsCard(name);
+    }
 
     detailEl.innerHTML = html;
     renderTotalsPanel(report);
