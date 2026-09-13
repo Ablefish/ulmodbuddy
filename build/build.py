@@ -51,6 +51,8 @@ BASE_ITEM_FILE = BASE_BLOCK_FILE = None
 MOD_ITEM_MODIFIERS_FILE = BASE_ITEM_MODIFIERS_FILE = None
 TRADERS_FILE = QUESTS_FILE = LOOT_CONTAINERS_FILE = LOOT_GROUP_FILES = None
 RECYCLE_FILE = None
+VEHICLE_ITEMS_FILE = None
+MOD_VEHICLES_FILE = BASE_VEHICLES_FILE = None
 
 
 class InstallRootError(ValueError):
@@ -90,6 +92,8 @@ def configure_paths(install_root):
     global MOD_ITEM_MODIFIERS_FILE, BASE_ITEM_MODIFIERS_FILE
     global TRADERS_FILE, QUESTS_FILE, LOOT_CONTAINERS_FILE, LOOT_GROUP_FILES
     global RECYCLE_FILE
+    global VEHICLE_ITEMS_FILE
+    global MOD_VEHICLES_FILE, BASE_VEHICLES_FILE
 
     SRC = Path(install_root)
     MOD_ROOT = SRC / "Mods" / "UndeadLegacy"
@@ -147,6 +151,16 @@ def configure_paths(install_root):
         CONFIG / "Custom" / "loot_twitch.xml",
     ]
     RECYCLE_FILE = CONFIG / "Custom" / "recipes_recycler.xml"
+    # Vehicle stats (cargo capacity, repair kit tier, mod slots...) live in
+    # their own <item>/<set> blocks here, entirely separate from the
+    # recipe/research system -- see load_vehicles().
+    VEHICLE_ITEMS_FILE = CONFIG / "Custom" / "items_vehicles.xml"
+    # Top speed lives in a completely different file/schema (<vehicle>, not
+    # <item>) keyed by an entity name that often differs from the item name
+    # (e.g. item "vehicleMinibikePlaceable" spawns entity "vehicleMinibike")
+    # -- see load_vehicle_speeds() and load_vehicles()'s entityName join.
+    MOD_VEHICLES_FILE = CONFIG / "vehicles.xml"
+    BASE_VEHICLES_FILE = SRC / "Data" / "Config" / "vehicles.xml"
 
 
 def _read_local_config():
@@ -905,6 +919,181 @@ def load_recycle_data():
 
 
 # ---------------------------------------------------------------------------
+# Vehicles -- <item>/<set xpath="...item[@name='X']"> in items_vehicles.xml
+# ---------------------------------------------------------------------------
+# Stats live entirely outside the recipe/research/acquisition system JP's
+# reports have been mapping so far, in their own file. Found while answering
+# JP's 2026-09-12 "which car has the most storage" question: neither the
+# five buildable vehicles (which DO have real recipes, e.g.
+# ulmVehicleMinibikeOld) nor the dozen-plus "find it broken down in the
+# world and repair it" cars (which have no recipe/research/acquisition
+# entry of their own at all -- a wrecked Sedan is placed directly in POI
+# prefabs, a channel this tool doesn't model) ever surfaced a Cargo
+# Capacity, Repair Kit tier, or Weight anywhere in the app.
+_VEHICLE_STAT_FIELDS = ("cargoCapacity", "repairTool", "weight", "param1",
+                        "maintenanceGroup", "modSlots", "degradationMax", "entityName")
+
+
+def load_vehicle_speeds():
+    """Returns {entity_name: topSpeed} -- the un-boosted "hold forward, no
+    sprint" speed (the first of the four velocityMax_turbo values: forward,
+    backward, turbo-forward, turbo-backward -- see JP's 2026-09-06 "does
+    Undead Legacy feel slower than vanilla" investigation).
+
+    The base game's own vehicles.xml is read first (every entity, mod-
+    touched or not, is fully defined there), then the mod's is layered on
+    top -- as either a full <vehicle> replacement/addition or an xpath
+    <set> patch, both handled the same way here, plus one narrower
+    attribute-only <set xpath=".../@value">newValue</set> shape (used for
+    just the minibike/motorcycle) that isn't a real XML element and needs
+    its own regex. Matches the mod-wins-over-base precedence used
+    throughout this file. A vehicle the mod never touches at all (e.g. the
+    plain Bicycle) correctly keeps its base-game value."""
+    speeds = {}
+
+    def scan(path):
+        if not path.exists():
+            warn(f"missing expected file: {path}")
+            return
+        text = read_text(path)
+        for tag in ("vehicle", "set"):
+            for frag in scan_blocks(text, tag):
+                el = parse_fragment(frag, path.name)
+                if el is None:
+                    continue
+                name = el.attrib.get("name")
+                if not name:
+                    m = re.search(r"@name='([^']+)'", el.attrib.get("xpath", ""))
+                    if not m:
+                        continue
+                    name = m.group(1)
+                for prop in el.iter("property"):
+                    if prop.attrib.get("name") == "velocityMax_turbo":
+                        speeds[name] = prop.attrib.get("value")
+
+    scan(BASE_VEHICLES_FILE)
+    scan(MOD_VEHICLES_FILE)
+
+    if MOD_VEHICLES_FILE.exists():
+        attr_set_re = re.compile(
+            r"<set xpath=\"/vehicles/vehicle\[@name='([^']+)'\]/property\[@name='velocityMax_turbo'\]/@value\">"
+            r"([^<]+)</set>"
+        )
+        for name, value in attr_set_re.findall(read_text(MOD_VEHICLES_FILE)):
+            speeds[name] = value.strip()
+
+    top_speed = {}
+    for name, value in speeds.items():
+        first = value.split(",")[0].strip()
+        try:
+            top_speed[name] = float(first)
+        except ValueError:
+            warn(f"vehicles.xml: '{name}' has an unparseable velocityMax_turbo value: {value!r}")
+    return top_speed
+
+
+def load_vehicles():
+    """Returns {name: {cargoCapacity, repairTool, weight, param1,
+    maintenanceGroup, modSlots, degradationMax, topSpeed}} for every vehicle
+    body style that has its own Tags/RepairTools/etc (a "representative").
+    `param1` is CarryWeight's second attribute, exposed under its raw XML
+    name rather than a guessed label -- see the comment where it's read.
+
+    Paint-swap variants (e.g. 13 recolors of the same Sedan, all sharing one
+    localization string -- confirmed against English.txt) never define
+    these stats themselves; they just <property name="Extends" value="..."/>
+    the first-listed color and add a paint-only Meshfile/VehicleWheels
+    tweak. Rather than show 13 indistinguishable rows, only names that
+    declare their own Tags (the tell for "this is a real definition, not a
+    recolor") are kept -- a recolor's stats are identical to its
+    representative's by construction, so nothing is lost."""
+    vehicles = {}
+    if not VEHICLE_ITEMS_FILE.exists():
+        warn(f"missing expected file: {VEHICLE_ITEMS_FILE}")
+        return vehicles
+    text = read_text(VEHICLE_ITEMS_FILE)
+
+    entries = {}
+    for tag in ("item", "set"):
+        for frag in scan_blocks(text, tag):
+            el = parse_fragment(frag, VEHICLE_ITEMS_FILE.name)
+            if el is None:
+                continue
+            name = el.attrib.get("name")
+            if not name:
+                # <set xpath="/items/item[@name='vehicleMinibikePlaceable']">
+                # -- the five base-game vehicles are patched this way, not
+                # declared fresh, so their name lives in the xpath instead.
+                m = re.search(r"@name='([^']+)'", el.attrib.get("xpath", ""))
+                if not m:
+                    continue
+                name = m.group(1)
+            d = entries.setdefault(name, {})
+            for prop in el.iter("property"):
+                pname = prop.attrib.get("name")
+                if pname == "Tags":
+                    d["tags"] = prop.attrib.get("value", "")
+                elif pname == "RepairTools":
+                    d["repairTool"] = prop.attrib.get("value")
+                elif pname == "MaintenanceGroup":
+                    d["maintenanceGroup"] = prop.attrib.get("value")
+                elif pname == "Extends":
+                    d["extends"] = prop.attrib.get("value")
+                elif pname == "CarryWeight":
+                    d["weight"] = prop.attrib.get("value")
+                    # This is genuinely unconfirmed -- CarryWeight's param1
+                    # is never used anywhere in the base game (only here, on
+                    # vehicles), so there's no vanilla precedent for what it
+                    # means. Ratio to `weight` is a clean 2-4x for the
+                    # simple vehicles (bicycle/minibike/motorcycle) but 10-30x
+                    # for cars/trucks/aircraft, which rules out both "tow
+                    # capacity" and "inventory slot count" (JP's and Claude's
+                    # guesses, 2026-09-12) -- a slot count of 6000 for a
+                    # Military Truck isn't plausible under any grid size.
+                    # Exposed as the raw attribute name rather than a
+                    # confident but possibly-wrong label.
+                    d["param1"] = prop.attrib.get("param1")
+                elif pname == "Vehicle":
+                    # <property class="Action1"><property name="Vehicle"
+                    # value="X"/></property> -- the spawned entity name, used
+                    # to join against load_vehicle_speeds() below. Usually
+                    # identical to the item name, except for the five
+                    # base-game-derived vehicles (e.g. item
+                    # "vehicleMinibikePlaceable" spawns entity
+                    # "vehicleMinibike").
+                    d["entityName"] = prop.attrib.get("value")
+            for eff in el.iter("passive_effect"):
+                ename = eff.attrib.get("name")
+                if ename == "VehicleCargoCapacity":
+                    d["cargoCapacity"] = eff.attrib.get("value")
+                elif ename == "ModSlots":
+                    d["modSlots"] = eff.attrib.get("value")
+                elif ename == "DegradationMax":
+                    d["degradationMax"] = eff.attrib.get("value")
+
+    def resolve(name, field, seen=None):
+        seen = seen or set()
+        if name in seen or name not in entries:
+            return None
+        seen.add(name)
+        d = entries[name]
+        if field in d:
+            return d[field]
+        ext = d.get("extends")
+        return resolve(ext, field, seen) if ext else None
+
+    speeds = load_vehicle_speeds()
+    for name, d in entries.items():
+        if "tags" not in d or "vehicle" not in d["tags"].split(","):
+            continue  # a recolor (or an unrelated Extends target), not a representative
+        v = {field: resolve(name, field) for field in _VEHICLE_STAT_FIELDS}
+        entity_name = v.pop("entityName", None) or name
+        v["topSpeed"] = speeds.get(entity_name)
+        vehicles[name] = v
+    return vehicles
+
+
+# ---------------------------------------------------------------------------
 # CustomIcon overrides -- lightweight regex scan of items/blocks files
 # (a full xpath-patch simulation isn't needed just to resolve icon names)
 #
@@ -1344,6 +1533,11 @@ def main(install_root):
     all_names |= item_mods
     print(f"  {len(item_mods)} distinct mod name(s)")
 
+    print("Loading vehicles (items_vehicles.xml)...")
+    vehicles = load_vehicles()
+    all_names |= set(vehicles.keys())
+    print(f"  {len(vehicles)} vehicle body style(s)")
+
     print("Backfilling display names via Extends chain...")
     extends_map, children_map = load_extends_graph()
     name_fallback_used = []
@@ -1472,6 +1666,7 @@ def main(install_root):
                 "recycleYieldItems": len(recycle_yields),
                 "recycleSourceRows": sum(len(v) for v in recycle_sources.values()),
                 "itemMods": len(item_mods),
+                "vehicles": len(vehicles),
             },
             "unlockBreakdown": unlock_counts,
             "warnings": WARNINGS,
@@ -1483,6 +1678,7 @@ def main(install_root):
         "recycleYields": recycle_yields,
         "recycleSources": recycle_sources,
         "itemMods": sorted(item_mods),
+        "vehicles": vehicles,
         "alwaysAvailableStations": sorted(ALWAYS_AVAILABLE_STATIONS),
         "iconFallbackNames": fallback_used,  # names whose icon is a representative variant, not their own
         "recipes": recipes,

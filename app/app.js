@@ -39,7 +39,7 @@
   const c = data.meta.counts;
   let metaHtml =
     `built ${data.meta.builtAt} from ${data.meta.sourceVersion} -- ` +
-    `${c.recipes} recipes (${c.recipeItemNames} items) / ${c.research} research / ${c.upgrades} upgrades / ${c.icons} icons`;
+    `${c.recipes} recipes (${c.recipeItemNames} items) / ${c.research} research / ${c.upgrades} upgrades / ${c.vehicles} vehicles / ${c.icons} icons`;
   if (data.meta.warnings.length) {
     metaHtml += ` -- <button class="meta-warnings-btn" onclick="window.__cookbookShowWarnings()">${data.meta.warnings.length} build warning(s)</button>`;
   }
@@ -139,6 +139,12 @@
     // they'd be invisible even though they're real, ownable things (found
     // via JP's report on mods like "Ball Cap Mod" missing entirely).
     ...(data.itemMods || []),
+    // Vehicle body styles: the buildable ones (Comet Minibike, etc.) are
+    // already a real recipe and covered above, but the "find it broken down
+    // in a POI and repair it" cars (Sedan, SUV, Ambulance...) have no
+    // recipe/research/acquisition entry at all -- they're placed directly
+    // in world prefabs, a channel this app doesn't otherwise model.
+    ...Object.keys(data.vehicles || {}),
   ]);
   const itemOnlyNames = new Set(
     [...orphanCandidates].filter(
@@ -443,6 +449,128 @@
     return `<div class="warning-note">This item has no icon of its own &mdash; it's a "variant" item with multiple placeable skins in-game, so the icon shown is just one representative skin.</div>`;
   }
 
+  // ---------------------------------------------------------------------
+  // Vehicle comparison table -- shown on every vehicle's own page (JP's
+  // 2026-09-12 "let me compare all vehicles while deciding which to
+  // repair" request), grouped by MaintenanceGroup (the repair-material
+  // tier -- see the same day's "is the Ambulance a Car or a Van" answer:
+  // it's the only classification the source data actually groups vehicles
+  // by) with the currently-viewed vehicle's row highlighted. Column headers
+  // are clickable to sort; sorting only ever reorders ROWS WITHIN a group
+  // -- the groups themselves and their order never change -- per JP's
+  // explicit call. Re-rendered in place (not via the full renderReportBody)
+  // so clicking a header doesn't collapse whatever construction-tree state
+  // is open elsewhere on the page.
+  // ---------------------------------------------------------------------
+  const VEHICLE_COLUMNS = [
+    { key: "name", label: "Vehicle" },
+    { key: "cargoCapacity", label: "Cargo (kg)", numeric: true },
+    { key: "topSpeed", label: "Top Speed", numeric: true },
+    { key: "weight", label: "Weight (kg)", numeric: true },
+    // param1 of the CarryWeight property -- genuinely unconfirmed what this
+    // represents (both "tow capacity" and "inventory slot count" were ruled
+    // out per JP's 2026-09-12 investigation), so it's labeled by its raw
+    // XML attribute name rather than a guessed meaning.
+    { key: "param1", label: "param1", numeric: true },
+    { key: "modSlots", label: "Mod Slots", numeric: true },
+    { key: "degradationMax", label: "Durability", numeric: true },
+    { key: "repairTool", label: "Repair Kit" },
+  ];
+  let vehicleSort = { column: "cargoCapacity", direction: -1 };
+  let vehicleCompareHighlight = null;
+
+  function vehicleColumnValue(col, name, v) {
+    if (col.key === "name") return displayName(name);
+    if (col.key === "repairTool") return v.repairTool ? displayName(v.repairTool) : "";
+    const raw = v[col.key];
+    return raw == null ? null : Number(raw);
+  }
+
+  function vehicleCompareTableHtml() {
+    const groups = new Map();
+    for (const [name, v] of Object.entries(data.vehicles || {})) {
+      const group = v.maintenanceGroup || "(none)";
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push([name, v]);
+    }
+    const groupLabel = (g) => g.replace(/^MG_/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+    // In-game unlock progression, not alphabetical -- per JP's call: you get
+    // a bike, then a minibike, then a motorcycle, then cars/vans (one
+    // MaintenanceGroup covers both -- see the "is the Ambulance a Car or a
+    // Van" answer, the source data never actually splits them), then
+    // trucks, then a gyrocopter. Helicopters aren't part of that mental
+    // model (JP didn't mention them) but still exist in the data, so they
+    // sort after everything named, in whatever order they naturally fall.
+    const GROUP_ORDER = ["MG_Bicycle", "MG_Minibike", "MG_Motorcycle", "MG_CarRepair", "MG_TruckRepair", "MG_Gyrocopter"];
+    const groupRank = (g) => {
+      const i = GROUP_ORDER.indexOf(g);
+      return i === -1 ? GROUP_ORDER.length : i;
+    };
+    const groupNames = [...groups.keys()].sort((a, b) => {
+      const ra = groupRank(a), rb = groupRank(b);
+      return ra !== rb ? ra - rb : groupLabel(a).localeCompare(groupLabel(b));
+    });
+
+    const col = VEHICLE_COLUMNS.find((c) => c.key === vehicleSort.column);
+    const dir = vehicleSort.direction;
+    for (const rows of groups.values()) {
+      rows.sort((a, b) => {
+        const va = vehicleColumnValue(col, a[0], a[1]);
+        const vb = vehicleColumnValue(col, b[0], b[1]);
+        if (va == null && vb == null) return 0;
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        if (typeof va === "number") return (va - vb) * dir;
+        return va.localeCompare(vb) * dir;
+      });
+    }
+
+    let html = `<div class="vehicle-compare-wrap"><table class="vehicle-compare-table"><thead><tr>`;
+    html += VEHICLE_COLUMNS.map((c) => {
+      const sorted = c.key === vehicleSort.column;
+      const arrow = sorted ? (dir === 1 ? " ▲" : " ▼") : "";
+      return `<th class="${sorted ? "sorted" : ""}" onclick="window.__cookbookSortVehicles('${c.key}')">${c.label}${arrow}</th>`;
+    }).join("");
+    html += `</tr></thead><tbody>`;
+    for (const group of groupNames) {
+      html += `<tr class="vehicle-group-row"><td colspan="${VEHICLE_COLUMNS.length}">${groupLabel(group)}</td></tr>`;
+      for (const [name, v] of groups.get(group)) {
+        const rowClass = name === vehicleCompareHighlight ? " vehicle-compare-row-highlight" : "";
+        html += `<tr class="${rowClass}">`;
+        html += `<td>${jumpSpan(name, displayName(name))}</td>`;
+        html += `<td>${v.cargoCapacity ?? "-"}</td>`;
+        html += `<td>${v.topSpeed ?? "-"}</td>`;
+        html += `<td>${v.weight ?? "-"}</td>`;
+        html += `<td>${v.param1 ?? "-"}</td>`;
+        html += `<td>${v.modSlots ?? "-"}</td>`;
+        html += `<td>${v.degradationMax ?? "-"}</td>`;
+        html += `<td>${v.repairTool ? jumpSpan(v.repairTool, displayName(v.repairTool)) : "-"}</td>`;
+        html += `</tr>`;
+      }
+    }
+    html += `</tbody></table></div>`;
+    return html;
+  }
+
+  function renderVehicleCompareSection(highlightName) {
+    vehicleCompareHighlight = highlightName;
+    return (
+      `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">All Vehicles</div>` +
+      `<div id="vehicle-compare-wrap">${vehicleCompareTableHtml()}</div>`
+    );
+  }
+
+  window.__cookbookSortVehicles = function (col) {
+    if (vehicleSort.column === col) {
+      vehicleSort.direction *= -1;
+    } else {
+      const spec = VEHICLE_COLUMNS.find((c) => c.key === col);
+      vehicleSort = { column: col, direction: spec && spec.numeric ? -1 : 1 };
+    }
+    const wrap = document.getElementById("vehicle-compare-wrap");
+    if (wrap) wrap.innerHTML = vehicleCompareTableHtml();
+  };
+
   // The item's own facts -- what used to be a separate "details" page,
   // transplanted to the top of its Total Requirements page per JP's
   // 2026-09-04 call to merge the two: browsing an item and sizing up its
@@ -473,6 +601,29 @@
         html += `<div class="kv-row"><span class="k">Upgrades to</span><span class="text-workstation">${workstationDisplayName(info.familyTiers[info.tierIndex + 1])}</span></div>`;
       }
       html += `</div>`;
+    }
+    // A vehicle body style is orthogonal to kind -- the five buildable ones
+    // (Comet Minibike, etc.) are a real recipe, while every "find it broken
+    // down and repair it" car (Sedan, SUV, Ambulance...) has no recipe of
+    // its own at all and only ever reaches a page via the "item" fallback
+    // (see orphanCandidates) -- so this card is appended regardless of kind
+    // rather than living inside the if/else above. See JP's 2026-09-12
+    // "which car has the most storage" question.
+    if (data.vehicles && data.vehicles[name]) {
+      const v = data.vehicles[name];
+      html += `<div class="variant-card">`;
+      if (v.cargoCapacity != null) html += `<div class="kv-row"><span class="k">Cargo Capacity</span><span>${v.cargoCapacity} kg</span></div>`;
+      if (v.topSpeed != null) html += `<div class="kv-row"><span class="k">Top Speed</span><span>${v.topSpeed} (no sprint)</span></div>`;
+      if (v.repairTool) html += `<div class="kv-row"><span class="k">Repair Kit</span><span>${jumpSpan(v.repairTool, displayName(v.repairTool))}</span></div>`;
+      if (v.weight != null) html += `<div class="kv-row"><span class="k">Vehicle Weight</span><span>${v.weight} kg</span></div>`;
+      // Unconfirmed what this second number means (see VEHICLE_COLUMNS) --
+      // shown by its raw XML attribute name rather than a guessed label.
+      if (v.param1 != null) html += `<div class="kv-row"><span class="k">param1</span><span>${v.param1}</span></div>`;
+      if (v.modSlots != null) html += `<div class="kv-row"><span class="k">Mod Slots</span><span>${v.modSlots}</span></div>`;
+      if (v.degradationMax != null) html += `<div class="kv-row"><span class="k">Durability</span><span>${v.degradationMax}</span></div>`;
+      if (v.maintenanceGroup) html += `<div class="kv-row"><span class="k">Maintenance Group</span><span>${v.maintenanceGroup}</span></div>`;
+      html += `</div>`;
+      html += renderVehicleCompareSection(name);
     }
     return html;
   }
