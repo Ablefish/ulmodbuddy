@@ -3,12 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <title>UL Mod Buddy</title>
-<link rel="stylesheet" href="styles.css?dev=19">
+<link rel="stylesheet" href="styles.css?dev=22">
 </head>
 <body>
 <header>
   <h1>UL Mod Buddy</h1>
   <div id="meta-line" class="meta-line"></div>
+  <button id="tree-btn" class="rebuild-btn" type="button" hidden
+          title="Browse the research tree by category">Research Tree</button>
   <button id="rebuild-btn" class="rebuild-btn" type="button" hidden
           title="Re-run the data build (e.g. after a mod update)">Rebuild data</button>
 </header>
@@ -42,6 +44,33 @@
   </div>
 </div>
 
+<!-- Research tree: <research> nodes grouped by their ultimate `parent`-chain
+     root -- see JP's 2026-09-13 "the in-game tabs aren't by station tier,
+     they're arbitrary category branches" call. Per JP's follow-up, one
+     category is ONE tree spanning all 3 station tiers in-game (never split
+     into 3), so the category picker selects a whole tree at once; tier is
+     shown only as each node's ring color (see the legend), not a splitter. -->
+<div id="tree-modal" class="modal-overlay" hidden>
+  <div class="modal-card modal-card-wide">
+    <div class="modal-header">
+      <span>Research Tree</span>
+      <button id="tree-modal-close" class="modal-close" type="button" title="Close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="tree-controls">
+        <label>Category: <select id="tree-category-select"></select></label>
+        <div class="tree-legend">
+          <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-1"></span>Tier 1</span>
+          <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-2"></span>Tier 2</span>
+          <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-3"></span>Tier 3</span>
+          <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-unlocked"></span>Unlocked by default</span>
+        </div>
+      </div>
+      <div id="tree-canvas-wrap" class="tree-canvas-wrap"></div>
+    </div>
+  </div>
+</div>
+
 <div id="build-modal" class="modal-overlay" hidden>
   <div class="modal-card">
     <div class="modal-header">
@@ -71,6 +100,6 @@
 <script src="data.js?dev=14"></script>
 <script src="reportEngine.js?dev=5"></script>
 <script src="setup.js?dev=2"></script>
-<script src="app.js?dev=41"></script>
+<script src="app.js?dev=47"></script>
 </body>
 </html>

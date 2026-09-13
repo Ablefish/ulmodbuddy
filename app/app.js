@@ -32,6 +32,11 @@
   const sourceModalTitleEl = $("#source-modal-title");
   const sourceModalBodyEl = $("#source-modal-body");
   const sourceModalCloseEl = $("#source-modal-close");
+  const treeBtnEl = $("#tree-btn");
+  const treeModalEl = $("#tree-modal");
+  const treeModalCloseEl = $("#tree-modal-close");
+  const treeCategorySelectEl = $("#tree-category-select");
+  const treeCanvasWrapEl = $("#tree-canvas-wrap");
 
   // ---------------------------------------------------------------------
   // Meta line
@@ -47,6 +52,7 @@
 
   rebuildBtnEl.hidden = false;
   rebuildBtnEl.addEventListener("click", () => window.ULModBuddySetup.open({ allowCancel: true }));
+  treeBtnEl.hidden = false;
 
   const displayName = (internalName) => {
     if (!internalName) return internalName;
@@ -57,13 +63,24 @@
   const iconFallbackNames = new Set(data.iconFallbackNames || []);
   const isIconFallback = (internalName) => iconFallbackNames.has(internalName);
 
-  // A research node's own symbol_X sprite (its `icon` attribute) is what the
-  // game's research tree UI actually shows for that node, so it takes
-  // priority even when the node's name happens to also resolve to an item's
-  // own icon. Only when a node has no symbol (about a third don't) do we
-  // fall back to its own name, then -- per JP's call -- to whichever of its
-  // own ingredients has an icon, so a node without direct art still shows
-  // something representative rather than a blank slot.
+  // Confirmed against the real in-game research UI (JP, 2026-09-13): a
+  // research node that unlocks exactly one object shows that object's own
+  // icon; a node that's a "pure research" hub (0 or 2+ unlocks, no direct
+  // item identity of its own) shows a generic research symbol instead --
+  // never a borrowed, unrelated ingredient's icon, which is what the
+  // previous fallback tier did. Priority:
+  //   1. the node's own symbol_X sprite (its `icon` attribute) -- takes
+  //      priority even when the node's name also resolves to an item's own
+  //      icon, since that symbol is what the tree actually shows for it.
+  //   2. the node's own name, when it directly names a real item (the
+  //      common case: a research node for one specific craftable/placeable
+  //      thing is usually named after it).
+  //   3. its single <unlocks> entry's icon, for the case where the node's
+  //      name differs from the one thing it unlocks (e.g. "Minibike
+  //      Maintenance" unlocking the "ulmBookMaintenanceMinibike" schematic).
+  //   4. the generic research symbol (a "pure research" hub with 0 or 2+
+  //      unlocks and no identity of its own -- ~5% of all nodes).
+  const GENERIC_RESEARCH_ICON = "symbol_microscope"; // used for the research-points resource itself in the game's own research window
   function iconForResearch(name) {
     const node = data.research[name];
     const symbolIcon = node && node.icon ? iconFor(node.icon.split(";")[0]) : null;
@@ -71,13 +88,12 @@
     const direct = iconFor(name);
     if (direct) return direct;
     if (!node) return null;
-    for (const ing of node.ingredients || []) {
-      if (ing.name) {
-        const ingIcon = iconFor(ing.name);
-        if (ingIcon) return ingIcon;
-      }
+    const unlocks = node.unlocks || [];
+    if (unlocks.length === 1) {
+      const unlockIcon = iconFor(unlocks[0].name);
+      if (unlockIcon) return unlockIcon;
     }
-    return null;
+    return iconFor(GENERIC_RESEARCH_ICON);
   }
 
   function qtyLabel(qty) {
@@ -403,8 +419,196 @@
   sourceModalEl.addEventListener("click", (e) => {
     if (e.target === sourceModalEl) hideSourceModal();
   });
+
+  // ---------------------------------------------------------------------
+  // Research tree -- JP's 2026-09-13 request. The in-game tabs turned out
+  // NOT to be the 3 `area` values (those are just which physical Research
+  // Station tier a node requires) -- walking every node's `parent` chain up
+  // to its ultimate root instead produces 12 real category branches (e.g.
+  // "Primitive Archery", "Novice Mechanic"). Per JP's follow-up: in-game,
+  // one category is ONE continuous tree spanning all 3 tiers -- it's never
+  // split into 3 separate tier trees -- so each category renders as a
+  // single canvas with every one of its nodes, tier shown only as a color
+  // ring rather than a hard split (an earlier version split by tier too,
+  // which orphaned every node whose real parent lived in an earlier tier).
+  // ---------------------------------------------------------------------
+  const researchRootCache = new Map();
+  function researchRootOf(name) {
+    if (researchRootCache.has(name)) return researchRootCache.get(name);
+    researchRootCache.set(name, name); // cycle guard: resolves to itself if re-entered
+    const node = data.research[name];
+    const root = node && node.parent ? researchRootOf(node.parent) : name;
+    researchRootCache.set(name, root);
+    return root;
+  }
+
+  const researchTreeGroups = new Map(); // root -> [research node, ...] (all tiers combined)
+  for (const [name, node] of Object.entries(data.research)) {
+    if (!node.pos) continue; // no coordinate to plot -- can't appear on any canvas
+    const root = researchRootOf(name);
+    if (!researchTreeGroups.has(root)) researchTreeGroups.set(root, []);
+    researchTreeGroups.get(root).push(node);
+  }
+  const researchCategories = [...researchTreeGroups.keys()].sort((a, b) =>
+    displayName(a).localeCompare(displayName(b))
+  );
+
+  function tierOf(area) {
+    const m = area && /_(\d+)$/.exec(area);
+    return m ? m[1] : "other";
+  }
+
+  // `pos` turned out to be relative to the node's own DIRECT parent, not an
+  // absolute canvas coordinate -- confirmed by JP's 2026-09-13 report of
+  // heavy node overlap, then verified against the source data: e.g. all 4
+  // children of ulmVehicleBicycle1 sit at x=2 with evenly spaced y
+  // (1.8/0.6/-0.6/-1.8), which only makes sense as "offset from parent",
+  // and two unrelated nodes (ulmVehicleBicycle1, ulmVehicleMinibikeOld)
+  // independently reuse the exact same pos="0,-4" -- impossible if these
+  // were shared absolute coordinates. So the real position of any node is
+  // its parent's real position plus its own `pos` delta, recursively --
+  // now walked across a category's FULL node set (every tier at once), so
+  // a tier-2 node's parent living in tier 1 is always found.
+  function computeAbsolutePositions(nodes) {
+    const nodeByName = new Map(nodes.map((n) => [n.name, n]));
+    const resolved = new Map();
+    const inProgress = new Set();
+    function abs(name) {
+      if (resolved.has(name)) return resolved.get(name);
+      const n = nodeByName.get(name);
+      const [dx, rawDy] = n.pos.split(",").map(Number);
+      // The game's own y axis runs the opposite way from SVG's -- a more
+      // negative dy means further DOWN in-game (confirmed by JP's
+      // 2026-09-13 report: Comet Minibike sits below Minibike Maintenance
+      // in-game, but rendered above it here) -- flipped once at the source
+      // so every accumulated position downstream comes out already correct.
+      const dy = -rawDy;
+      let base = { x: 0, y: 0 };
+      // Only the category's true root (no parent at all) or a cycle-guard
+      // hit anchors at its own delta -- everything else's parent is now
+      // guaranteed present in the same full-category node set.
+      if (n.parent && nodeByName.has(n.parent) && !inProgress.has(n.parent)) {
+        inProgress.add(name);
+        base = abs(n.parent);
+        inProgress.delete(name);
+      }
+      const result = { x: base.x + dx, y: base.y + dy };
+      resolved.set(name, result);
+      return result;
+    }
+    const positions = new Map();
+    for (const n of nodes) positions.set(n.name, abs(n.name));
+    return positions;
+  }
+
+  function renderResearchTreeSvg(root) {
+    const nodes = researchTreeGroups.get(root) || [];
+    if (!nodes.length) return `<div class="req-flag-dim">No nodes in this category.</div>`;
+
+    const SCALE = 70;
+    const PAD = 50;
+    const absPos = computeAbsolutePositions(nodes);
+    const xs = [...absPos.values()].map((p) => p.x);
+    const ys = [...absPos.values()].map((p) => p.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const width = (Math.max(...xs) - minX) * SCALE + PAD * 2;
+    const height = (Math.max(...ys) - minY) * SCALE + PAD * 2;
+    const posOf = (name) => {
+      const p = absPos.get(name);
+      return { x: (p.x - minX) * SCALE + PAD, y: (p.y - minY) * SCALE + PAD };
+    };
+    const nodeByName = new Map(nodes.map((n) => [n.name, n]));
+
+    // link_type="H" (335 of 588 nodes) correlates with a consistent, larger
+    // horizontal position delta from the parent (e.g. dx=5 paired with a
+    // small/varying dy) vs. the mostly-vertical deltas on unset nodes (e.g.
+    // dx=0, dy=-2) -- read as a connector-ROUTING hint (an orthogonal elbow
+    // bend, common in tech-tree UIs for keeping a wide sibling fan-out
+    // tidy) rather than decoration. Unconfirmed against the game's actual
+    // (compiled) renderer -- per JP's 2026-09-13 call, worth trying and
+    // comparing against the in-game display rather than assuming.
+    let edges = "";
+    for (const n of nodes) {
+      if (!n.parent || !nodeByName.has(n.parent)) continue;
+      const p1 = posOf(n.parent);
+      const p2 = posOf(n.name);
+      if (n.link_type === "H") {
+        const midX = (p1.x + p2.x) / 2;
+        edges += `<path class="tree-edge" fill="none" d="M${p1.x},${p1.y} L${midX},${p1.y} L${midX},${p2.y} L${p2.x},${p2.y}"/>`;
+      } else {
+        edges += `<line class="tree-edge" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}"/>`;
+      }
+    }
+
+    let nodesHtml = "";
+    for (const n of nodes) {
+      const p = posOf(n.name);
+      const r = n.size === "large" ? 26 : 18;
+      const icon = iconForResearch(n.name);
+      const cls =
+        "tree-node" +
+        ` tree-node-tier-${tierOf(n.area)}` +
+        (n.size === "large" ? " tree-node-large" : "") +
+        (n.unlocked ? " tree-node-unlocked" : "");
+      nodesHtml += `<g class="${cls}" data-name="${n.name}" transform="translate(${p.x},${p.y})">`;
+      nodesHtml += `<circle r="${r}"/>`;
+      if (icon) nodesHtml += `<image href="${icon}" x="${-r * 0.7}" y="${-r * 0.7}" width="${r * 1.4}" height="${r * 1.4}"/>`;
+      nodesHtml += `<text y="${r + 14}" text-anchor="middle">${displayName(n.name)}</text>`;
+      nodesHtml += `</g>`;
+    }
+
+    return (
+      `<svg class="tree-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">` +
+      `<g class="tree-edges">${edges}</g><g class="tree-nodes">${nodesHtml}</g></svg>`
+    );
+  }
+
+  const treeState = { root: null };
+
+  function renderTreeCanvas() {
+    treeCanvasWrapEl.innerHTML = renderResearchTreeSvg(treeState.root);
+  }
+
+  function selectTreeCategory(root) {
+    treeState.root = root;
+    treeCategorySelectEl.value = root;
+    renderTreeCanvas();
+  }
+
+  function hideTreeModal() {
+    treeModalEl.hidden = true;
+  }
+
+  function openTreeModal() {
+    if (!treeCategorySelectEl.options.length) {
+      treeCategorySelectEl.innerHTML = researchCategories
+        .map((root) => `<option value="${root}">${displayName(root)} (${researchTreeGroups.get(root).length})</option>`)
+        .join("");
+    }
+    if (!treeState.root) selectTreeCategory(researchCategories[0]);
+    treeModalEl.hidden = false;
+  }
+
+  treeBtnEl.addEventListener("click", openTreeModal);
+  treeModalCloseEl.addEventListener("click", hideTreeModal);
+  treeModalEl.addEventListener("click", (e) => {
+    if (e.target === treeModalEl) hideTreeModal();
+  });
+  treeCategorySelectEl.addEventListener("change", () => selectTreeCategory(treeCategorySelectEl.value));
+  // Clicking a node jumps to its real page, same as any other cross-reference
+  // in the app -- the tree is a navigation aid, not a separate mini-app.
+  treeCanvasWrapEl.addEventListener("click", (e) => {
+    const g = e.target.closest(".tree-node");
+    if (!g) return;
+    hideTreeModal();
+    window.__cookbookJump(g.dataset.name);
+  });
+
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !sourceModalEl.hidden) hideSourceModal();
+    if (e.key !== "Escape") return;
+    if (!sourceModalEl.hidden) hideSourceModal();
+    if (!treeModalEl.hidden) hideTreeModal();
   });
 
   // Craftable/harvestable/purchasable/lootable/rewardable -- independent of
