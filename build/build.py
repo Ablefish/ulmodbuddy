@@ -53,6 +53,7 @@ TRADERS_FILE = QUESTS_FILE = LOOT_CONTAINERS_FILE = LOOT_GROUP_FILES = None
 RECYCLE_FILE = None
 VEHICLE_ITEMS_FILE = None
 MOD_VEHICLES_FILE = BASE_VEHICLES_FILE = None
+VEHICLE_BLOCKS_FILE = RECIPE_VEHICLES_FILE = None
 
 
 class InstallRootError(ValueError):
@@ -94,6 +95,7 @@ def configure_paths(install_root):
     global RECYCLE_FILE
     global VEHICLE_ITEMS_FILE
     global MOD_VEHICLES_FILE, BASE_VEHICLES_FILE
+    global VEHICLE_BLOCKS_FILE, RECIPE_VEHICLES_FILE
 
     SRC = Path(install_root)
     MOD_ROOT = SRC / "Mods" / "UndeadLegacy"
@@ -161,6 +163,11 @@ def configure_paths(install_root):
     # -- see load_vehicle_speeds() and load_vehicles()'s entityName join.
     MOD_VEHICLES_FILE = CONFIG / "vehicles.xml"
     BASE_VEHICLES_FILE = SRC / "Data" / "Config" / "vehicles.xml"
+    # World-repair costs for a found/damaged vehicle -- a completely separate
+    # schema (<vehicle block="...">, not <recipe>) from blocks_vehicles.xml's
+    # own block definitions -- see load_vehicle_repairs().
+    VEHICLE_BLOCKS_FILE = CONFIG / "Custom" / "blocks_vehicles.xml"
+    RECIPE_VEHICLES_FILE = CONFIG / "Custom" / "recipes_vehicles.xml"
 
 
 def _read_local_config():
@@ -993,11 +1000,17 @@ def load_vehicle_speeds():
 
 
 def load_vehicles():
-    """Returns {name: {cargoCapacity, repairTool, weight, param1,
-    maintenanceGroup, modSlots, degradationMax, topSpeed}} for every vehicle
-    body style that has its own Tags/RepairTools/etc (a "representative").
-    `param1` is CarryWeight's second attribute, exposed under its raw XML
-    name rather than a guessed label -- see the comment where it's read.
+    """Returns (vehicles, color_variant_of):
+      - vehicles: {name: {cargoCapacity, repairTool, weight, param1,
+        maintenanceGroup, modSlots, degradationMax, topSpeed}} for every
+        vehicle body style that has its own Tags/RepairTools/etc (a
+        "representative"). `param1` is CarryWeight's second attribute,
+        exposed under its raw XML name rather than a guessed label -- see
+        the comment where it's read.
+      - color_variant_of: {recolor_name: representative_name} for every
+        paint-swap variant, so app.js can hide them from the browsable
+        index and redirect straight to the representative instead -- see
+        the comment where it's built, below.
 
     Paint-swap variants (e.g. 13 recolors of the same Sedan, all sharing one
     localization string -- confirmed against English.txt) never define
@@ -1090,7 +1103,138 @@ def load_vehicles():
         entity_name = v.pop("entityName", None) or name
         v["topSpeed"] = speeds.get(entity_name)
         vehicles[name] = v
-    return vehicles
+
+    # Every recolor is independently purchasable/lootable in its own right
+    # (a trader can roll any paint job), so without this it would surface as
+    # its own separate, data-less "item" page sharing the exact same display
+    # name as its representative -- found via JP's 2026-09-13 report that
+    # clicking "Renegade" sometimes landed on a blank page: 14 different
+    # ulmVehicleMotorcycle03<Color> names are all independently purchasable
+    # and all display as "Renegade", and only one of them is the
+    # ulmVehicleMotorcycle03White representative actually in `vehicles`
+    # above. app.js uses this to hide recolors from the browsable index and
+    # redirect any direct reference straight to the representative instead.
+    def resolve_representative(name, seen=None):
+        seen = seen or set()
+        if name in seen or name not in entries:
+            return None
+        seen.add(name)
+        if name in vehicles:
+            return name
+        ext = entries[name].get("extends")
+        return resolve_representative(ext, seen) if ext else None
+
+    color_variant_of = {}
+    for name in entries:
+        if name in vehicles:
+            continue
+        rep = resolve_representative(name)
+        if rep:
+            color_variant_of[name] = rep
+
+    return vehicles, color_variant_of
+
+
+def _index_vehicle_block_join_keys():
+    """Returns {block_name: ("exact", item_name) | ("prefix", item_prefix)}
+    -- every world vehicle block's own link to the item it spawns once
+    repaired, straight off its <property class="DynamicVehicle"> (ItemName
+    for a single fixed item, e.g. the Ambulance; ItemPrefix for one of
+    several paint-variant items sharing that prefix, e.g. "ulmVehicleSedan03"
+    + whichever color the world roll picked). This is the mod's own
+    authoritative join key -- found while tracing why the Renegade
+    motorcycle had no recipe (JP's 2026-09-12 question) -- so
+    load_vehicle_repairs() below never has to guess a name mapping."""
+    keys = {}
+    if not VEHICLE_BLOCKS_FILE.exists():
+        warn(f"missing expected file: {VEHICLE_BLOCKS_FILE}")
+        return keys
+    text = read_text(VEHICLE_BLOCKS_FILE)
+    for frag in scan_blocks(text, "block"):
+        el = parse_fragment(frag, VEHICLE_BLOCKS_FILE.name)
+        if el is None:
+            continue
+        name = el.attrib.get("name")
+        if not name:
+            continue
+        item_name = None
+        item_prefix = None
+        for prop in el.iter("property"):
+            pname = prop.attrib.get("name")
+            if pname == "ItemName":
+                item_name = prop.attrib.get("value")
+            elif pname == "ItemPrefix" and prop.attrib.get("value"):
+                # Some blocks declare this twice, once as a blank placeholder
+                # then the real value (e.g. ulmVehicleMotorcycle03Fallen) --
+                # scanning every match and only keeping truthy ones means the
+                # real value always wins regardless of which copy comes last.
+                item_prefix = prop.attrib.get("value")
+        if item_name:
+            keys[name] = ("exact", item_name)
+        elif item_prefix:
+            keys[name] = ("prefix", item_prefix)
+    return keys
+
+
+def load_vehicle_repairs(vehicle_names):
+    """Returns {vehicle_name: [{damage, learnable, tools, ingredients}, ...]}
+    -- the material cost to repair a found, already-broken-down copy of that
+    vehicle in the world, straight off <vehicle block="a,b,c" damage="N"
+    learnable="..." tools="...">, in recipes_vehicles.xml. This is a
+    schema completely separate from (and, for most "find it and repair it"
+    cars, the ONLY path to obtaining) the recipes.xml crafting system.
+
+    A repair entry's block= list names WORLD BLOCKS, not vehicle items, so
+    each is resolved via _index_vehicle_block_join_keys(): an exact
+    ItemName match, or an ItemPrefix matched by PREFIX against the known
+    vehicle names -- not by re-deriving one specific color suffix, since a
+    world spawn's own paint-color pool doesn't always happen to include
+    whichever color this tool picked as the representative (e.g. the
+    vanilla "Sedan 03 Classic" wreck never rolls white, even though the
+    Sedan 03 body style obviously still repairs the same way regardless of
+    paint). Tiers are sorted by damage ascending (least to most damaged).
+    """
+    repairs = {}
+    if not RECIPE_VEHICLES_FILE.exists():
+        warn(f"missing expected file: {RECIPE_VEHICLES_FILE}")
+        return repairs
+    block_keys = _index_vehicle_block_join_keys()
+    text = read_text(RECIPE_VEHICLES_FILE)
+    for frag in scan_blocks(text, "vehicle"):
+        el = parse_fragment(frag, RECIPE_VEHICLES_FILE.name)
+        if el is None:
+            continue
+        block_list = [b.strip() for b in el.attrib.get("block", "").split(",") if b.strip()]
+        matched = set()
+        for b in block_list:
+            join = block_keys.get(b)
+            if not join:
+                continue
+            kind, value = join
+            if kind == "exact":
+                if value in vehicle_names:
+                    matched.add(value)
+            else:
+                matched.update(n for n in vehicle_names if n.startswith(value))
+        if not matched:
+            warn(f"{RECIPE_VEHICLES_FILE.name}: repair entry for block(s) "
+                 f"'{el.attrib.get('block')}' didn't match any known vehicle")
+            continue
+        ingredients = [
+            {"name": ing.attrib.get("name"), "count": ing.attrib.get("count", "1")}
+            for ing in el.findall("ingredient") if ing.attrib.get("name")
+        ]
+        tier = {
+            "damage": el.attrib.get("damage"),
+            "learnable": el.attrib.get("learnable"),
+            "tools": [t.strip() for t in el.attrib.get("tools", "").split(",") if t.strip()],
+            "ingredients": ingredients,
+        }
+        for name in matched:
+            repairs.setdefault(name, []).append(tier)
+    for tiers in repairs.values():
+        tiers.sort(key=lambda t: float(t["damage"]) if t["damage"] else 0)
+    return repairs
 
 
 # ---------------------------------------------------------------------------
@@ -1534,9 +1678,23 @@ def main(install_root):
     print(f"  {len(item_mods)} distinct mod name(s)")
 
     print("Loading vehicles (items_vehicles.xml)...")
-    vehicles = load_vehicles()
+    vehicles, vehicle_color_variants = load_vehicles()
     all_names |= set(vehicles.keys())
-    print(f"  {len(vehicles)} vehicle body style(s)")
+    print(f"  {len(vehicles)} vehicle body style(s), "
+          f"{len(vehicle_color_variants)} color-variant name(s) mapped to them")
+
+    print("Loading vehicle world-repair costs (recipes_vehicles.xml)...")
+    vehicle_repairs = load_vehicle_repairs(set(vehicles.keys()))
+    for name, tiers in vehicle_repairs.items():
+        vehicles[name]["repairRecipes"] = tiers
+        for tier in tiers:
+            for ing in tier["ingredients"]:
+                all_names.add(ing["name"])
+            if tier["learnable"]:
+                all_names.add(tier["learnable"])
+            all_names.update(tier["tools"])
+    print(f"  {sum(len(t) for t in vehicle_repairs.values())} repair recipe(s) "
+          f"across {len(vehicle_repairs)} vehicle(s)")
 
     print("Backfilling display names via Extends chain...")
     extends_map, children_map = load_extends_graph()
@@ -1667,6 +1825,8 @@ def main(install_root):
                 "recycleSourceRows": sum(len(v) for v in recycle_sources.values()),
                 "itemMods": len(item_mods),
                 "vehicles": len(vehicles),
+                "vehicleRepairRecipes": sum(len(t) for t in vehicle_repairs.values()),
+                "vehicleColorVariants": len(vehicle_color_variants),
             },
             "unlockBreakdown": unlock_counts,
             "warnings": WARNINGS,
@@ -1679,6 +1839,7 @@ def main(install_root):
         "recycleSources": recycle_sources,
         "itemMods": sorted(item_mods),
         "vehicles": vehicles,
+        "vehicleColorVariants": vehicle_color_variants,
         "alwaysAvailableStations": sorted(ALWAYS_AVAILABLE_STATIONS),
         "iconFallbackNames": fallback_used,  # names whose icon is a representative variant, not their own
         "recipes": recipes,

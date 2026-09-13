@@ -146,14 +146,33 @@
     // in world prefabs, a channel this app doesn't otherwise model.
     ...Object.keys(data.vehicles || {}),
   ]);
+  // A vehicle recolor (e.g. 14 different paint jobs of the Renegade, each
+  // independently purchasable from a trader) shares its representative's
+  // exact display name but carries none of its stats -- indexing it
+  // separately produced a wall of identically-labeled "Renegade" results
+  // where only one was ever the real page (JP's 2026-09-13 report: clicking
+  // "Renegade" sometimes landed on a near-empty page). Excluded from the
+  // browsable index entirely; __cookbookJump below redirects any direct
+  // reference straight to the representative instead.
+  const vehicleColorVariantOf = data.vehicleColorVariants || {};
   const itemOnlyNames = new Set(
     [...orphanCandidates].filter(
-      (name) => !stationFamilyNames.has(name) && !data.recipesByName[name] && !data.research[name]
+      (name) =>
+        !stationFamilyNames.has(name) &&
+        !data.recipesByName[name] &&
+        !data.research[name] &&
+        !vehicleColorVariantOf[name]
     )
   );
 
   const isKnownName = (name) =>
-    !!(stationFamilyNames.has(name) || data.recipesByName[name] || data.research[name] || itemOnlyNames.has(name));
+    !!(
+      stationFamilyNames.has(name) ||
+      data.recipesByName[name] ||
+      data.research[name] ||
+      itemOnlyNames.has(name) ||
+      vehicleColorVariantOf[name]
+    );
 
   // ---------------------------------------------------------------------
   // Build a flat searchable index: one entry per item name, kind = recipe/research/workstation/item.
@@ -298,6 +317,7 @@
   // first (a tier-1 name is also a real recipe, but it's browsed as a
   // workstation now -- see stationFamilyNames), then recipe, then research.
   window.__cookbookJump = function (name) {
+    if (vehicleColorVariantOf[name]) name = vehicleColorVariantOf[name];
     if (stationFamilyNames.has(name)) selectByKey("workstation:" + name);
     else if (data.recipesByName[name]) selectByKey("recipe:" + name);
     else if (data.research[name]) selectByKey("research:" + name);
@@ -560,6 +580,41 @@
     );
   }
 
+  // World-repair costs (recipes_vehicles.xml, joined to the vehicle item via
+  // its block's own ItemName/ItemPrefix -- see build.py's
+  // load_vehicle_repairs()) -- a completely separate path from crafting,
+  // and for most "find it and repair it" cars the ONLY path. Not every
+  // vehicle has one: the five buildable "Placeable" vanilla templates never
+  // showed up in the source data as independently repairable (only their
+  // "ulm"-branded counterpart is, e.g. the Comet Minibike but not the
+  // vanilla Minibike item) -- see JP's 2026-09-12 Renegade question.
+  function renderVehicleRepairSection(v) {
+    if (!v.repairRecipes || !v.repairRecipes.length) return "";
+    let html = `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Repair Cost (found in the world)</div>`;
+    html += v.repairRecipes
+      .map((tier) => {
+        let card = `<div class="variant-card">`;
+        card += `<div class="kv-row"><span class="k">Damage Tier</span><span>${tier.damage}</span></div>`;
+        if (tier.learnable) {
+          card += `<div class="kv-row"><span class="k">Schematic</span><span>${jumpSpan(tier.learnable, displayName(tier.learnable))}</span></div>`;
+        }
+        if (tier.tools && tier.tools.length) {
+          card += `<div class="kv-row"><span class="k">Tool</span><span>${tier.tools.map((t) => displayName(t)).join(" / ")}</span></div>`;
+        }
+        card += `<ul class="ingredient-list">`;
+        card += tier.ingredients
+          .map(
+            (ing) =>
+              `<li>${reportRowIcon(ing.name)}<span class="ing-count">${qtyLabel(Number(ing.count))}&times;</span>${jumpSpan(ing.name, displayName(ing.name))}</li>`
+          )
+          .join("");
+        card += `</ul></div>`;
+        return card;
+      })
+      .join("");
+    return html;
+  }
+
   window.__cookbookSortVehicles = function (col) {
     if (vehicleSort.column === col) {
       vehicleSort.direction *= -1;
@@ -623,6 +678,7 @@
       if (v.degradationMax != null) html += `<div class="kv-row"><span class="k">Durability</span><span>${v.degradationMax}</span></div>`;
       if (v.maintenanceGroup) html += `<div class="kv-row"><span class="k">Maintenance Group</span><span>${v.maintenanceGroup}</span></div>`;
       html += `</div>`;
+      html += renderVehicleRepairSection(v);
       html += renderVehicleCompareSection(name);
     }
     return html;
