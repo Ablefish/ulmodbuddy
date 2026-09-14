@@ -29,9 +29,13 @@ your install folder; they're referenced directly from it.
    run it from a local copy, clone this repository and open `app/index.html`
    directly in your browser. Either way, no server or Python is needed.
 2. Click **Choose your install folder...** and pick your *7 Days to Die*
-   install, e.g. `C:\7D2D\Custom\Undead_22` (the folder should contain both
-   `Mods\UndeadLegacy` and `Data`). Your browser will ask you to confirm
-   read access to it.
+   install -- the default vanilla Steam location, e.g.
+   `D:\SteamInstall\steamapps\common\7 Days To Die`, if you installed Undead
+   Legacy directly into it, or a separate folder like
+   `C:\7D2D\Custom\Undead_22` if you used a mod launcher (e.g. ModLauncherV5)
+   that clones a fresh install per modpack. Either way, the folder should
+   contain both `Mods\UndeadLegacy` and `Data`. Your browser will ask you to
+   confirm read access to it.
 3. The app reads your local install and builds the dataset right there in
    the page; it takes a few seconds. That's it -- the app takes over once
    the build finishes.
