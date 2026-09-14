@@ -7,7 +7,7 @@
 // what lets the app run as a static page (e.g. GitHub Pages) with zero
 // installs. See setup.js for the UI that drives this.
 //
-// Two deliberate differences from build.py, agreed with JP (2026-09-13):
+// Two deliberate differences from build.py:
 //   - XML is parsed whole-file with the browser's native DOMParser rather
 //     than build.py's fragment-by-fragment regex scanner. These files are
 //     already successfully parsed by the game's own engine every time the
@@ -109,12 +109,11 @@ window.ULModBuddyBuilder = (function () {
   // Paths
   // -------------------------------------------------------------------
   // Like tryGetDir, but on failure remembers *why* -- used only for the
-  // handful of hops the top-level install-root check depends on, so that if
-  // a folder that verifiably exists on disk still comes back "missing" (a
-  // real case seen in testing: permission/traversal issues can surface as
-  // NotFoundError, not just NotAllowedError, so this isn't just a swallowed
-  // permission error, either), the actual DOMException name/message is
-  // available to explain it instead of a bare "expected to find" list.
+  // handful of hops the top-level install-root check depends on. Permission
+  // and traversal issues can both surface as a DOMException (NotFoundError
+  // as well as NotAllowedError), so the actual name/message is kept
+  // available to explain a "missing" folder instead of a bare
+  // "expected to find" list.
   async function getDirDiag(parent, name, pathSoFar, diagnostics) {
     if (!parent) {
       diagnostics.push(`${pathSoFar}\\${name}: parent folder wasn't found (see above)`);
@@ -199,20 +198,13 @@ window.ULModBuddyBuilder = (function () {
     };
   }
 
-  // ModInfo.xml's <Version> is maintained by hand and has been seen
-  // lagging behind real releases (2.7.01 there vs. 2.7.24/2.7.32 two real
-  // installs actually were -- JP, 2026-09-14). The real version IS
-  // embedded in UndeadLegacy.dll (confirmed byte-for-byte: three
-  // length-prefixed strings back to back in the assembly's blob heap,
-  // `[12]"UndeadLegacy"[13]"Undead Legacy"[N]"X.Y.Z"`), but reading it
-  // turned out to be a dead end, not just an unhandled edge case: Chromium's
-  // File System Access API hard-blocks getFileHandle() for a fixed list of
-  // "dangerous" extensions -- .dll included -- with
-  // "TypeError: ... Name is not allowed.", regardless of the granted
-  // directory permission. No client-side workaround exists (confirmed via
-  // the exact browser error before reverting this). So: ModInfo.xml is
-  // used as-is, labeled honestly as its own source rather than presented
-  // as authoritative.
+  // ModInfo.xml's <Version> is maintained by hand and can lag behind the
+  // mod's real released version. The real version is embedded in
+  // UndeadLegacy.dll, but Chromium's File System Access API hard-blocks
+  // getFileHandle() for a fixed list of "dangerous" extensions -- .dll
+  // included -- with no client-side workaround, so that isn't readable
+  // from the browser. ModInfo.xml is used as-is instead, labeled by its
+  // source rather than presented as authoritative.
   async function loadModVersion(paths) {
     let modName = "UndeadLegacy";
     let xmlVersion = null;

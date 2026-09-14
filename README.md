@@ -20,12 +20,16 @@ Pimps, Subquake, or the Undead Legacy team.
 ## No mod content is bundled
 
 This repository contains only the tool itself. **No game files, mod files,
-or extracted images are included or ever committed.** The app asks you to
-grant it access to your own, legally-owned *7 Days to Die* install (with
-Undead Legacy installed as a mod) and builds a dataset directly from those
-files, entirely in your browser. Nothing is ever uploaded anywhere -- there
-is no server involved at all, and no mod files or icons are copied out of
-your install folder; they're referenced directly from it.
+or extracted images are included or ever committed.** You grant the app
+access to your own, legally-owned *7 Days to Die* install (with Undead
+Legacy installed as a mod), and it builds a dataset directly from those
+files on your own machine. Nothing is ever uploaded anywhere.
+
+With the zero-install setup, this all happens in your browser and mod files
+and icons are referenced directly from your install folder -- nothing is
+copied. With the Python fallback, icons are copied into a local `app/icons`
+folder so your browser can display them; this stays on your machine, is
+never committed (see `.gitignore`), and is never sent anywhere.
 
 ## Setup (zero install -- Chrome or Edge)
 

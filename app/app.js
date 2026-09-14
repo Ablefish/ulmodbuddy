@@ -56,9 +56,9 @@ window.ULModBuddyApp = (function () {
   }
   metaEl.innerHTML = metaHtml;
   // ModInfo.xml's <Version> is maintained by hand and can lag behind an
-  // actual release (confirmed against two real installs, 2026-09-14) --
-  // the number itself already says "(per ModInfo.xml)"; this just spells
-  // out why on hover, rather than crowding the header line with it.
+  // actual release -- the number itself already says "(per ModInfo.xml)";
+  // this just spells out why on hover, rather than crowding the header
+  // line with it.
   metaEl.title = "The mod version above is read from the mod's own ModInfo.xml, which its author doesn't always update on every release -- it may not match what the game itself displays.";
 
   rebuildBtnEl.hidden = false;
@@ -74,12 +74,11 @@ window.ULModBuddyApp = (function () {
   const iconFallbackNames = new Set(data.iconFallbackNames || []);
   const isIconFallback = (internalName) => iconFallbackNames.has(internalName);
 
-  // Confirmed against the real in-game research UI (JP, 2026-09-13): a
-  // research node that unlocks exactly one object shows that object's own
-  // icon; a node that's a "pure research" hub (0 or 2+ unlocks, no direct
-  // item identity of its own) shows a generic research symbol instead --
-  // never a borrowed, unrelated ingredient's icon, which is what the
-  // previous fallback tier did. Priority:
+  // Matches the real in-game research UI: a research node that unlocks
+  // exactly one object shows that object's own icon; a node that's a "pure
+  // research" hub (0 or 2+ unlocks, no direct item identity of its own)
+  // shows a generic research symbol instead -- never a borrowed, unrelated
+  // ingredient's icon. Priority:
   //   1. the node's own symbol_X sprite (its `icon` attribute) -- takes
   //      priority even when the node's name also resolves to an item's own
   //      icon, since that symbol is what the tree actually shows for it.
@@ -113,12 +112,12 @@ window.ULModBuddyApp = (function () {
   }
 
   // ---------------------------------------------------------------------
-  // Workstation tiers -- per JP's 2026-09-04 call: browse each tier of a
-  // station (Tier 1, Tier 2, ...) as its own item instead of an abstract
-  // "upgrade" entry. data.upgrades is keyed by the FROM tier (`block`); a
-  // family's base tier never appears as a `next`, so that's how roots are
-  // found. Tier 1's own cost is a normal recipe (data.recipesByName); every
-  // later tier's cost is the upgrade INTO it (data.upgrades[prevTierName]).
+  // Workstation tiers -- each tier of a station (Tier 1, Tier 2, ...) is
+  // browsed as its own item instead of an abstract "upgrade" entry.
+  // data.upgrades is keyed by the FROM tier (`block`); a family's base tier
+  // never appears as a `next`, so that's how roots are found. Tier 1's own
+  // cost is a normal recipe (data.recipesByName); every later tier's cost
+  // is the upgrade INTO it (data.upgrades[prevTierName]).
   const upgradedInto = new Set(Object.values(data.upgrades).map((u) => u.next).filter(Boolean));
   const workstationFamilies = Object.keys(data.upgrades)
     .filter((block) => !upgradedInto.has(block))
@@ -152,10 +151,9 @@ window.ULModBuddyApp = (function () {
   // Anything with real acquisition/harvest/recycle data but no recipe,
   // research, or workstation identity of its own -- e.g. a "Desktop PC"
   // that's only ever a Recycler *output*, never craftable, researchable, or
-  // buildable. Without this, such a name had data but no page: unsearchable
-  // (never in `index` below), and unclickable everywhere it showed up as an
-  // ingredient (see isKnownName/jumpSpan) -- found via JP's 2026-09-06
-  // report that a known-to-exist recycle item was nowhere to be found.
+  // buildable. Without this, such a name would have data but no page:
+  // unsearchable (never in `index` below), and unclickable everywhere it
+  // shows up as an ingredient (see isKnownName/jumpSpan).
   const orphanCandidates = new Set([
     ...Object.keys(data.acquisition || {}),
     ...Object.keys(data.harvestSources || {}),
@@ -163,8 +161,8 @@ window.ULModBuddyApp = (function () {
     ...Object.keys(data.recycleSources || {}),
     // Weapon/armor mods (item_modifiers.xml) -- some have no acquisition
     // channel this app tracks at all, so without their own explicit list
-    // they'd be invisible even though they're real, ownable things (found
-    // via JP's report on mods like "Ball Cap Mod" missing entirely).
+    // they'd be invisible even though they're real, ownable things (e.g.
+    // "Ball Cap Mod").
     ...(data.itemMods || []),
     // Vehicle body styles: the buildable ones (Comet Minibike, etc.) are
     // already a real recipe and covered above, but the "find it broken down
@@ -176,9 +174,8 @@ window.ULModBuddyApp = (function () {
   // A vehicle recolor (e.g. 14 different paint jobs of the Renegade, each
   // independently purchasable from a trader) shares its representative's
   // exact display name but carries none of its stats -- indexing it
-  // separately produced a wall of identically-labeled "Renegade" results
-  // where only one was ever the real page (JP's 2026-09-13 report: clicking
-  // "Renegade" sometimes landed on a near-empty page). Excluded from the
+  // separately would produce a wall of identically-labeled "Renegade"
+  // results where only one is ever the real page. Excluded from the
   // browsable index entirely; __cookbookJump below redirects any direct
   // reference straight to the representative instead.
   const vehicleColorVariantOf = data.vehicleColorVariants || {};
@@ -267,10 +264,9 @@ window.ULModBuddyApp = (function () {
     }
 
     // Safety cap well above the current dataset size (~1,600 rows total) so
-    // nothing renders thousands of DOM nodes if the mod grows a lot -- but
-    // unlike the old hard 400-row cutoff, this is never silent: if it ever
-    // actually truncates, a note says so instead of the list just stopping
-    // partway through the alphabet with no explanation.
+    // nothing renders thousands of DOM nodes if the mod grows a lot. Never
+    // silent: if it ever actually truncates, a note says so instead of the
+    // list just stopping partway through the alphabet with no explanation.
     const RENDER_CAP = 2000;
     const truncated = rows.length > RENDER_CAP;
 
@@ -432,16 +428,14 @@ window.ULModBuddyApp = (function () {
   });
 
   // ---------------------------------------------------------------------
-  // Research tree -- JP's 2026-09-13 request. The in-game tabs turned out
-  // NOT to be the 3 `area` values (those are just which physical Research
-  // Station tier a node requires) -- walking every node's `parent` chain up
-  // to its ultimate root instead produces 12 real category branches (e.g.
-  // "Primitive Archery", "Novice Mechanic"). Per JP's follow-up: in-game,
-  // one category is ONE continuous tree spanning all 3 tiers -- it's never
-  // split into 3 separate tier trees -- so each category renders as a
-  // single canvas with every one of its nodes, tier shown only as a color
-  // ring rather than a hard split (an earlier version split by tier too,
-  // which orphaned every node whose real parent lived in an earlier tier).
+  // Research tree. The in-game tabs are NOT the 3 `area` values (those are
+  // just which physical Research Station tier a node requires) -- walking
+  // every node's `parent` chain up to its ultimate root instead produces 12
+  // real category branches (e.g. "Primitive Archery", "Novice Mechanic").
+  // In-game, one category is ONE continuous tree spanning all 3 tiers --
+  // it's never split into 3 separate tier trees -- so each category renders
+  // as a single canvas with every one of its nodes, tier shown only as a
+  // color ring rather than a hard split.
   // ---------------------------------------------------------------------
   const researchRootCache = new Map();
   function researchRootOf(name) {
@@ -469,17 +463,16 @@ window.ULModBuddyApp = (function () {
     return m ? m[1] : "other";
   }
 
-  // `pos` turned out to be relative to the node's own DIRECT parent, not an
-  // absolute canvas coordinate -- confirmed by JP's 2026-09-13 report of
-  // heavy node overlap, then verified against the source data: e.g. all 4
-  // children of ulmVehicleBicycle1 sit at x=2 with evenly spaced y
-  // (1.8/0.6/-0.6/-1.8), which only makes sense as "offset from parent",
-  // and two unrelated nodes (ulmVehicleBicycle1, ulmVehicleMinibikeOld)
-  // independently reuse the exact same pos="0,-4" -- impossible if these
-  // were shared absolute coordinates. So the real position of any node is
-  // its parent's real position plus its own `pos` delta, recursively --
-  // now walked across a category's FULL node set (every tier at once), so
-  // a tier-2 node's parent living in tier 1 is always found.
+  // `pos` is relative to the node's own DIRECT parent, not an absolute
+  // canvas coordinate: e.g. all 4 children of ulmVehicleBicycle1 sit at x=2
+  // with evenly spaced y (1.8/0.6/-0.6/-1.8), which only makes sense as
+  // "offset from parent", and two unrelated nodes (ulmVehicleBicycle1,
+  // ulmVehicleMinibikeOld) independently reuse the exact same pos="0,-4" --
+  // impossible if these were shared absolute coordinates. So the real
+  // position of any node is its parent's real position plus its own `pos`
+  // delta, recursively -- walked across a category's FULL node set (every
+  // tier at once), so a tier-2 node's parent living in tier 1 is always
+  // found.
   function computeAbsolutePositions(nodes) {
     const nodeByName = new Map(nodes.map((n) => [n.name, n]));
     const resolved = new Map();
@@ -489,10 +482,9 @@ window.ULModBuddyApp = (function () {
       const n = nodeByName.get(name);
       const [dx, rawDy] = n.pos.split(",").map(Number);
       // The game's own y axis runs the opposite way from SVG's -- a more
-      // negative dy means further DOWN in-game (confirmed by JP's
-      // 2026-09-13 report: Comet Minibike sits below Minibike Maintenance
-      // in-game, but rendered above it here) -- flipped once at the source
-      // so every accumulated position downstream comes out already correct.
+      // negative dy means further DOWN in-game -- flipped once at the
+      // source so every accumulated position downstream comes out already
+      // correct.
       const dy = -rawDy;
       let base = { x: 0, y: 0 };
       // Only the category's true root (no parent at all) or a cycle-guard
@@ -517,9 +509,8 @@ window.ULModBuddyApp = (function () {
     if (!nodes.length) return `<div class="req-flag-dim">No nodes in this category.</div>`;
 
     // SCALE (grid-unit-to-pixel spacing, from the game's own `pos` deltas)
-    // stays untouched -- per JP's 2026-09-14 call, not worth re-fighting
-    // that math a second time. Since a node only ever shows an icon and a
-    // name, ZOOM instead just makes each node's own rendered elements
+    // is fixed. Since a node only ever shows an icon and a name, ZOOM
+    // instead just makes each node's own rendered elements
     // (circle/icon/text) bigger relative to that fixed grid spacing, so
     // there's less dead space between them -- the SVG is then displayed
     // fit-to-width (see .tree-svg's CSS) rather than at native pixel size,
@@ -546,9 +537,8 @@ window.ULModBuddyApp = (function () {
     // small/varying dy) vs. the mostly-vertical deltas on unset nodes (e.g.
     // dx=0, dy=-2) -- read as a connector-ROUTING hint (an orthogonal elbow
     // bend, common in tech-tree UIs for keeping a wide sibling fan-out
-    // tidy) rather than decoration. Unconfirmed against the game's actual
-    // (compiled) renderer -- per JP's 2026-09-13 call, worth trying and
-    // comparing against the in-game display rather than assuming.
+    // tidy) rather than decoration. Not confirmed against the game's actual
+    // (compiled) renderer.
     let edges = "";
     for (const n of nodes) {
       if (!n.parent || !nodeByName.has(n.parent)) continue;
@@ -728,13 +718,13 @@ window.ULModBuddyApp = (function () {
   // below (needed so a drag that leaves the wrap's bounds keeps tracking)
   // makes the browser retarget the eventual click event to whatever element
   // captured the pointer -- tree-canvas-wrap itself, never the node actually
-  // under the cursor. That silently broke node-click navigation entirely
-  // (found via JP's 2026-09-14 report), the same root cause fixed for the
-  // +/-/Fit buttons by excluding them from capture -- but nodes can't just be
-  // excluded the same way, since a drag gesture routinely starts on top of
-  // one. Instead, the node (if any) is captured on pointerdown, before
-  // capture can retarget anything, and acted on on pointerup if the pointer
-  // never actually moved.
+  // under the cursor. That would silently break node-click navigation
+  // entirely -- the same root cause the +/-/Fit buttons avoid by being
+  // excluded from capture -- but nodes can't just be excluded the same way,
+  // since a drag gesture routinely starts on top of one. Instead, the node
+  // (if any) is captured on pointerdown, before capture can retarget
+  // anything, and acted on on pointerup if the pointer never actually
+  // moved.
   let treeDragging = false;
   let treeDragMoved = false;
   let treeDragStartClientX = 0;
@@ -799,9 +789,9 @@ window.ULModBuddyApp = (function () {
   // no entry at all (most research-only names, and any block you only ever
   // build/place), so callers can skip the row entirely rather than show an
   // empty one.
-  // Ordered least-common (left) to most-common (right) -- per JP's call, so
-  // the badge you're most likely to see for any given item sits closest to
-  // the name, and the rarer channels are the ones pushed furthest away.
+  // Ordered least-common (left) to most-common (right), so the badge you're
+  // most likely to see for any given item sits closest to the name, and the
+  // rarer channels are the ones pushed furthest away.
   // Measured counts at build time: recyclable 83, harvestable 151,
   // rewardable 950, craftable ~921, lootable 1241, purchasable 1445.
   const ACQUISITION_LABELS = {
@@ -822,8 +812,8 @@ window.ULModBuddyApp = (function () {
   };
   // Wrapped in its own flex span (margin-left: auto) rather than left as
   // loose inline badges, so it pushes to the right edge of whatever
-  // flex row it lands in -- per JP's call, the item name reads easier when
-  // it isn't competing with a run of badges immediately after it.
+  // flex row it lands in -- the item name reads easier when it isn't
+  // competing with a run of badges immediately after it.
   function acquisitionBadges(name) {
     const acq = data.acquisition && data.acquisition[name];
     if (!acq) return "";
@@ -856,27 +846,25 @@ window.ULModBuddyApp = (function () {
   }
 
   // ---------------------------------------------------------------------
-  // Vehicle comparison table -- shown on every vehicle's own page (JP's
-  // 2026-09-12 "let me compare all vehicles while deciding which to
-  // repair" request), grouped by MaintenanceGroup (the repair-material
-  // tier -- see the same day's "is the Ambulance a Car or a Van" answer:
-  // it's the only classification the source data actually groups vehicles
-  // by) with the currently-viewed vehicle's row highlighted. Column headers
-  // are clickable to sort; sorting only ever reorders ROWS WITHIN a group
-  // -- the groups themselves and their order never change -- per JP's
-  // explicit call. Re-rendered in place (not via the full renderReportBody)
-  // so clicking a header doesn't collapse whatever construction-tree state
-  // is open elsewhere on the page.
+  // Vehicle comparison table -- shown on every vehicle's own page, grouped
+  // by MaintenanceGroup (the repair-material tier, and the only
+  // classification the source data actually groups vehicles by) with the
+  // currently-viewed vehicle's row highlighted. Column headers are
+  // clickable to sort; sorting only ever reorders ROWS WITHIN a group -- the
+  // groups themselves and their order never change. Re-rendered in place
+  // (not via the full renderReportBody) so clicking a header doesn't
+  // collapse whatever construction-tree state is open elsewhere on the
+  // page.
   // ---------------------------------------------------------------------
   const VEHICLE_COLUMNS = [
     { key: "name", label: "Vehicle" },
     { key: "cargoCapacity", label: "Cargo (kg)", numeric: true },
     { key: "topSpeed", label: "Top Speed", numeric: true },
     { key: "weight", label: "Weight (kg)", numeric: true },
-    // param1 of the CarryWeight property -- genuinely unconfirmed what this
-    // represents (both "tow capacity" and "inventory slot count" were ruled
-    // out per JP's 2026-09-12 investigation), so it's labeled by its raw
-    // XML attribute name rather than a guessed meaning.
+    // param1 of the CarryWeight property -- what this represents is
+    // unconfirmed ("tow capacity" and "inventory slot count" have both been
+    // ruled out), so it's labeled by its raw XML attribute name rather than
+    // a guessed meaning.
     { key: "param1", label: "param1", numeric: true },
     { key: "modSlots", label: "Mod Slots", numeric: true },
     { key: "degradationMax", label: "Durability", numeric: true },
@@ -900,13 +888,12 @@ window.ULModBuddyApp = (function () {
       groups.get(group).push([name, v]);
     }
     const groupLabel = (g) => g.replace(/^MG_/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2");
-    // In-game unlock progression, not alphabetical -- per JP's call: you get
-    // a bike, then a minibike, then a motorcycle, then cars/vans (one
-    // MaintenanceGroup covers both -- see the "is the Ambulance a Car or a
-    // Van" answer, the source data never actually splits them), then
-    // trucks, then a gyrocopter. Helicopters aren't part of that mental
-    // model (JP didn't mention them) but still exist in the data, so they
-    // sort after everything named, in whatever order they naturally fall.
+    // In-game unlock progression, not alphabetical: bike, then minibike,
+    // then motorcycle, then cars/vans (one MaintenanceGroup covers both --
+    // the source data never actually splits them), then trucks, then a
+    // gyrocopter. Helicopters aren't part of that progression but still
+    // exist in the data, so they sort after everything named, in whatever
+    // order they naturally fall.
     const GROUP_ORDER = ["MG_Bicycle", "MG_Minibike", "MG_Motorcycle", "MG_CarRepair", "MG_TruckRepair", "MG_Gyrocopter"];
     const groupRank = (g) => {
       const i = GROUP_ORDER.indexOf(g);
@@ -970,10 +957,10 @@ window.ULModBuddyApp = (function () {
   // its block's own ItemName/ItemPrefix -- see build.py's
   // load_vehicle_repairs()) -- a completely separate path from crafting,
   // and for most "find it and repair it" cars the ONLY path. Not every
-  // vehicle has one: the five buildable "Placeable" vanilla templates never
-  // showed up in the source data as independently repairable (only their
+  // vehicle has one: the five buildable "Placeable" vanilla templates don't
+  // appear in the source data as independently repairable (only their
   // "ulm"-branded counterpart is, e.g. the Comet Minibike but not the
-  // vanilla Minibike item) -- see JP's 2026-09-12 Renegade question.
+  // vanilla Minibike item).
   function renderVehicleRepairSection(v) {
     if (!v.repairRecipes || !v.repairRecipes.length) return "";
     let html = `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Repair Cost (found in the world)</div>`;
@@ -1012,20 +999,18 @@ window.ULModBuddyApp = (function () {
     if (wrap) wrap.innerHTML = vehicleCompareTableHtml();
   };
 
-  // The item's own facts -- what used to be a separate "details" page,
-  // transplanted to the top of its Total Requirements page per JP's
-  // 2026-09-04 call to merge the two: browsing an item and sizing up its
-  // cost are the same task now, not two pages linked by a button. Doesn't
-  // repeat the recipe's own Ingredients (the Construction Cost breakdown
-  // right below already covers that, interactively) or a research node's
-  // own cost (same reason -- see its Unlock Chain entry).
+  // The item's own facts, shown at the top of its Total Requirements page:
+  // browsing an item and sizing up its cost are the same task, not two
+  // pages linked by a button. Doesn't repeat the recipe's own Ingredients
+  // (the Construction Cost breakdown right below already covers that,
+  // interactively) or a research node's own cost (same reason -- see its
+  // Unlock Chain entry).
   function renderFactsBlock(kind, name, recipeId) {
     let html = "";
-    // A recipe's Unlock/Workstation/Time/Yields/Tags/Source card is gone,
-    // per JP's call: Unlock duplicated (and could disagree with -- see
-    // unlockBadge's stale via-name bug) the Research Required section,
-    // Workstation duplicated the Workstations section, and the rest wasn't
-    // pulling its weight against the redundancy.
+    // A recipe's own Unlock/Workstation/Time/Yields/Tags/Source facts aren't
+    // shown here: Unlock would duplicate the Research Required section,
+    // Workstation would duplicate the Workstations section, and the rest
+    // isn't worth the redundancy.
     if (kind === "research") {
       const node = data.research[name];
       html += `<div class="variant-card">`;
@@ -1048,8 +1033,7 @@ window.ULModBuddyApp = (function () {
     // down and repair it" car (Sedan, SUV, Ambulance...) has no recipe of
     // its own at all and only ever reaches a page via the "item" fallback
     // (see orphanCandidates) -- so this card is appended regardless of kind
-    // rather than living inside the if/else above. See JP's 2026-09-12
-    // "which car has the most storage" question.
+    // rather than living inside the if/else above.
     if (data.vehicles && data.vehicles[name]) {
       const v = data.vehicles[name];
       html += `<div class="variant-card">`;
@@ -1073,7 +1057,7 @@ window.ULModBuddyApp = (function () {
   // ---------------------------------------------------------------------
   // Total Requirements Report -- interactive
   //
-  // Per JP's 2026-09-04 design: nothing auto-expands past the target itself.
+  // Nothing auto-expands past the target itself.
   // Every craftable ingredient/tool/workstation/research step starts
   // collapsed (assume you'll buy/loot/harvest/already-have it) and shows a
   // native <details> triangle; clicking it says "I'll make this myself" and
@@ -1081,19 +1065,18 @@ window.ULModBuddyApp = (function () {
   // (construction and one-time alike) only count what's currently expanded.
   //
   // Expand state is path-keyed (per tree POSITION, not per item name) for
-  // ingredients/research -- JP's call: owning one Beaker to build a
-  // workstation doesn't mean you own a second one for some other recipe
-  // that also needs one. Workstations and research nodes are keyed by name
-  // instead, since those are singular, global facts ("I have a Chemistry
-  // Station" / "I've researched Carpentry"), not consumable counts.
+  // ingredients/research: owning one Beaker to build a workstation doesn't
+  // mean you own a second one for some other recipe that also needs one.
+  // Workstations and research nodes are keyed by name instead, since those
+  // are singular, global facts ("I have a Chemistry Station" / "I've
+  // researched Carpentry"), not consumable counts.
   // ---------------------------------------------------------------------
   let reportState = null; // { kind, name, recipeId, qty, expanded: Set<path> }
 
   // A name with no icon still reserves the icon's own width (an invisible
   // placeholder, same pattern as .result-icon.placeholder in the results
   // list) so every row's name starts at the same x position regardless of
-  // which sibling rows happen to have real icons -- per JP's call, first
-  // noticed in the harvest sources modal but applies everywhere this is used.
+  // which sibling rows happen to have real icons.
   function reportRowIcon(name, extraClass) {
     const icon = iconFor(name);
     const cls = `ing-icon${extraClass ? " " + extraClass : ""}`;
@@ -1125,8 +1108,8 @@ window.ULModBuddyApp = (function () {
   }
 
   // Ingredient rows read highest-quantity-first rather than in whatever
-  // order the source XML happens to list them -- per JP's call, applied
-  // uniformly everywhere a set of sibling ingredient/tier nodes is built.
+  // order the source XML happens to list them -- applied uniformly
+  // everywhere a set of sibling ingredient/tier nodes is built.
   function sortByQtyDesc(children) {
     children.sort((a, b) => (b.qty || 0) - (a.qty || 0));
   }
@@ -1137,7 +1120,7 @@ window.ULModBuddyApp = (function () {
   // Shared by root ingredients, nested ingredients, workstation upgrade-step
   // ingredients, and research-cost ingredients -- they all follow the same
   // rule. `totalsMap` is construction- or one-time-totals depending on the
-  // caller, keeping those two counts separate per JP's earlier call.
+  // caller, keeping those two counts separate.
   function buildIngredientNode(ctx, totalsMap, name, qty, path, ancestry) {
     const ids = data.recipesByName[name];
     if (!ids || !ids.length) {
@@ -1196,10 +1179,10 @@ window.ULModBuddyApp = (function () {
   // (via registerWorkstationTrigger) rather than nested as a child: this
   // list is the flat "what's currently in play" panel, not a construction
   // tree, so expanding Tier 2 should surface Tier 1 as its own line here --
-  // and on a workstation's own page too, per JP's call, rather than nested
-  // inside its Crafting Cost tree -- and collapsing Tier 2 again should drop
-  // it (naturally, since this whole report rebuilds from
-  // reportState.expanded on every render).
+  // and on a workstation's own page too -- rather than nested inside its
+  // Crafting Cost tree -- and collapsing Tier 2 again should drop it
+  // (naturally, since this whole report rebuilds from reportState.expanded
+  // on every render).
   function buildWorkstationNode(ctx, entry) {
     const { area, triggerName } = entry;
     const path = "ws:" + area;
@@ -1281,7 +1264,7 @@ window.ULModBuddyApp = (function () {
     return node;
   }
 
-  // Collapsed by default (JP: "I've already researched this"); expanding
+  // Collapsed by default (assume "I've already researched this"); expanding
   // reveals its own ingredient cost (same rules as any other ingredient)
   // and cascades into its parent -- also collapsed by default -- the same
   // way. `shown` guards a shared ancestor reached via two branches.
@@ -1391,11 +1374,11 @@ window.ULModBuddyApp = (function () {
         });
         sortByQtyDesc(constructionTree.children);
         // The previous tier is a workstation requirement, not a consumed
-        // ingredient -- per JP's call, it belongs in the Workstations
-        // section like any other, not nested inside Crafting Cost. Reuses
-        // the exact same registration buildWorkstationNode already knows
-        // how to expand and cascade further back (Tier 1, if this is Tier
-        // 3), rather than a separate nested-tree code path for it.
+        // ingredient -- it belongs in the Workstations section like any
+        // other, not nested inside Crafting Cost. Reuses the exact same
+        // registration buildWorkstationNode already knows how to expand and
+        // cascade further back (Tier 1, if this is Tier 3), rather than a
+        // separate nested-tree code path for it.
         registerWorkstationTrigger(ctx, prevName, workstationDisplayName(name));
       }
     } else if (kind === "research") {
@@ -1440,18 +1423,18 @@ window.ULModBuddyApp = (function () {
 
   function renderIngredientNode(node) {
     if (node.kind === "material") {
-      // No "raw material -- no recipe" note here anymore (JP's call): the
-      // absence of a Craft acquisition badge already says that. Circular
-      // reference stays -- it's a real edge case the badges don't cover.
+      // No "raw material -- no recipe" note here: the absence of a Craft
+      // acquisition badge already says that. Circular reference stays --
+      // it's a real edge case the badges don't cover.
       const tag = node.circular ? ` <span class="req-flag">(circular reference &mdash; counted as raw here)</span>` : "";
       return `<li class="req-leaf">${reportRowIcon(node.name)}<span class="ing-count">${qtyLabel(node.qty)}&times;</span>${jumpSpan(node.name, displayName(node.name))}${tag} ${acquisitionBadges(node.name)}</li>`;
     }
     // Plain text, not jumpSpan: this whole row is a click-to-toggle target,
-    // and a nested navigate-away link on the name made clicking anywhere
-    // near it a gamble between expanding and leaving the report entirely.
-    // (Recipe-variant/always-unlocked detail used to show here as a
-    // parenthetical -- dropped per JP's call: it wasn't telling you anything
-    // the acquisition badges don't already cover, just crowding the row.)
+    // and a nested navigate-away link on the name would make clicking
+    // anywhere near it a gamble between expanding and leaving the report
+    // entirely. Recipe-variant/always-unlocked detail isn't shown as a
+    // parenthetical here either -- the acquisition badges already cover
+    // that ground without crowding the row.
     const caret = `<span class="req-caret">${node.open ? "▾" : "▸"}</span>`;
     const row = `${caret}${reportRowIcon(node.name)}<span class="ing-count">${qtyLabel(node.qty)}&times;</span><span>${displayName(node.name)}</span> ${acquisitionBadges(node.name)}`;
     if (!node.open) {
@@ -1465,9 +1448,9 @@ window.ULModBuddyApp = (function () {
   }
 
   function renderWorkstationNode(node) {
-    // Green font, no icon ring: per JP's call, a workstation is fundamentally
-    // "an item" here (same as in the Ingredient Breakdown's nested tier
-    // requirement), so it doesn't get the research-style ring treatment.
+    // Green font, no icon ring: a workstation is fundamentally "an item"
+    // here (same as in the Ingredient Breakdown's nested tier requirement),
+    // so it doesn't get the research-style ring treatment.
     const triggerNote = node.triggerName ? ` <span class="req-flag-dim">&mdash; needed for ${node.triggerName}</span>` : "";
     const label = `${reportRowIcon(node.area)}<span class="text-workstation">${workstationDisplayName(node.area)}</span>${triggerNote}`;
     if (!node.hasUpgrade) return `<li class="req-leaf">${label}</li>`;
@@ -1495,10 +1478,10 @@ window.ULModBuddyApp = (function () {
     if (node.alreadyShown) {
       return `<li class="req-leaf req-dim">${researchChip(node.name, displayName(node.name), "ing-icon")} <span class="req-flag-dim">(already listed above)</span></li>`;
     }
-    // Blue pill around icon + name, per JP's call: the Unlock Chain mixes
-    // research nodes with the plain items they cost, and with so many
-    // research entries cascading through one item's chain, the two need to
-    // read as visually distinct at a glance.
+    // Blue pill around icon + name: the Unlock Chain mixes research nodes
+    // with the plain items they cost, and with so many research entries
+    // cascading through one item's chain, the two need to read as visually
+    // distinct at a glance.
     const label = researchChip(node.name, displayName(node.name), "ing-icon");
     const caret = `<span class="req-caret">${node.open ? "▾" : "▸"}</span>`;
     const row = `<div class="req-toggle" data-path="${node.path}">${caret}${label}</div>`;
@@ -1586,9 +1569,9 @@ window.ULModBuddyApp = (function () {
   // Straight from data.recycleYields (build.py's load_recycle_data) -- a
   // flat, terminal fact about this item, not a toggleable tree, since a
   // Recycler output is never itself further craftable/expandable the way an
-  // ingredient can be. Per JP's 2026-09-05 call: shown as part of an item's
-  // own page, same convention as Workstations/Tools below (always shows the
-  // section, with a plain "not recyclable" note rather than omitting it).
+  // ingredient can be. Shown as part of an item's own page, same convention
+  // as Workstations/Tools below (always shows the section, with a plain
+  // "not recyclable" note rather than omitting it).
   function renderRecycleYieldsCard(name) {
     const outputs = data.recycleYields && data.recycleYields[name];
     let html = `<div class="variant-card">`;
@@ -1614,11 +1597,11 @@ window.ULModBuddyApp = (function () {
     const panel = document.getElementById("totals-panel");
     if (!panel) return;
     // Merges the per-craft Crafting Cost total in with the one-time
-    // research/workstation/tool total, per JP's call: a recipe's own direct
-    // ingredients are always counted here (root children are never
-    // collapsed away), so opening a recipe with nothing expanded shows
-    // exactly what it costs to make one -- expanding anything just adds to
-    // the same running total instead of needing a second card to check.
+    // research/workstation/tool total: a recipe's own direct ingredients
+    // are always counted here (root children are never collapsed away), so
+    // opening a recipe with nothing expanded shows exactly what it costs to
+    // make one -- expanding anything just adds to the same running total
+    // instead of needing a second card to check.
     const combined = new Map(report.oneTimeTotals);
     for (const [k, v] of report.constructionTotals) {
       combined.set(k, (combined.get(k) || 0) + v);
@@ -1648,8 +1631,8 @@ window.ULModBuddyApp = (function () {
     }
     // Acquisition (craftable/harvestable/purchasable/lootable/rewardable) is
     // about how to obtain an ITEM -- meaningless for a research node itself,
-    // per JP's call, so it's skipped there. Lives on the title row, pushed
-    // to the right, rather than its own separate card further down.
+    // so it's skipped there. Lives on the title row, pushed to the right,
+    // rather than its own separate card further down.
     if (kind !== "research") html += acquisitionBadges(name);
     html += `</div>`;
     html += iconFallbackNote(name);
@@ -1748,9 +1731,9 @@ window.ULModBuddyApp = (function () {
   }
 
   // A research page's whole point is sizing up what that research itself
-  // costs -- per JP's call, its own top-level Research Required entry
-  // (just that one, not its ancestor cascade) starts expanded rather than
-  // making that the first click every time you open one.
+  // costs -- its own top-level Research Required entry (just that one, not
+  // its ancestor cascade) starts expanded rather than making that the
+  // first click every time you open one.
   function initialExpandedPaths(kind, name) {
     const expanded = new Set();
     if (kind === "research") expanded.add("res:" + name);
@@ -1768,8 +1751,8 @@ window.ULModBuddyApp = (function () {
     // (see the CSS comment on .req-toggle for why) -- toggles this path in
     // reportState.expanded and re-renders so the change propagates to
     // totals and any Workstations/Tools entries it triggers. These rows
-    // deliberately carry no jump-to-item link (JP's call: a click anywhere
-    // on the row should toggle, never risk navigating away instead).
+    // deliberately carry no jump-to-item link: a click anywhere on the row
+    // should toggle, never risk navigating away instead.
     const toggleRow = e.target.closest(".req-toggle");
     if (toggleRow && reportState) {
       const path = toggleRow.dataset.path;

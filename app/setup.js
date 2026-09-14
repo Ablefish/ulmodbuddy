@@ -1,21 +1,35 @@
 // UL Mod Buddy build-setup flow -- the "point me at your install" modal.
 //
-// Zero-install version: there's no server, no data.js generated ahead of
-// time -- the dataset is either read back from IndexedDB (a previous visit's
-// build, cached by storage.js) or built live in the browser (build.js)
-// against a folder the user grants access to via the File System Access
-// API. This file owns the whole flow: it opens the modal automatically (no
-// way to cancel, since there's nothing usable behind it yet) when no cached
-// dataset exists, and exposes window.ULModBuddySetup.open({allowCancel}) so
-// app.js's "Rebuild data" button can reopen it later.
+// Two independent ways to get a dataset, gated entirely on File System
+// Access API support (`supported`, below) -- exactly one is ever wired up
+// and visible per page load:
+//   - Supported (Chrome/Edge/Brave-with-the-flag): zero-install. The
+//     dataset is either read back from IndexedDB (a previous visit's
+//     build, cached by storage.js) or built live in the browser (build.js)
+//     against a folder the user grants access to via showDirectoryPicker().
+//   - Unsupported (Firefox/Safari/Brave-without-the-flag): the Python
+//     fallback. Only works when this page is actually being served by
+//     `python app/server.py` -- POSTs the typed install path to its
+//     /api/build, which runs build/build.py in-process and writes
+//     app/data.js, then loaded here as a fresh <script> tag (never a
+//     static index.html reference, so a page that's never built yet
+//     doesn't 404 on load). /api/config best-effort prefills the input
+//     from server.py's own remembered last-used path.
 //
-// One picked folder handle is reused across visits. Once a folder's been
-// picked once, the modal offers two explicit choices rather than silently
-// guessing which one you want: "Rebuild from current folder" (re-confirms
-// permission on the saved handle -- needs a user gesture, which this button
-// click provides) or "Choose a different folder..." (always opens a fresh
-// picker, e.g. switching between a live install and a test/clone one).
-// First-run setup has no saved folder yet, so it's just the one button.
+// This file owns the whole flow either way: it opens the modal
+// automatically (no way to cancel, since there's nothing usable behind it
+// yet) when no cached/existing dataset is found, and exposes
+// window.ULModBuddySetup.open({allowCancel}) so app.js's "Rebuild data"
+// button can reopen it later.
+//
+// Supported-path detail: one picked folder handle is reused across visits.
+// Once a folder's been picked once, the modal offers two explicit choices
+// rather than silently guessing which one you want: "Rebuild from current
+// folder" (re-confirms permission on the saved handle -- needs a user
+// gesture, which this button click provides) or "Choose a different
+// folder..." (always opens a fresh picker, e.g. switching between a live
+// install and a test/clone one). First-run setup has no saved folder yet,
+// so it's just the one button.
 //
 // window.ULModBuddyApp.init(data) is called EXACTLY ONCE per real page load
 // -- a first-run build calls it directly (nothing has initialized yet this
@@ -32,7 +46,11 @@
   const cancelEl = $("#build-cancel");
   const chooseEl = $("#build-choose");
   const chooseNewEl = $("#build-choose-new");
+  const chooseRowEl = $("#build-choose-row");
   const unsupportedEl = $("#build-unsupported");
+  const formEl = $("#build-form");
+  const pathInputEl = $("#build-path-input");
+  const submitEl = $("#build-submit");
   const errorEl = $("#build-error");
   const statusEl = $("#build-status");
   const logEl = $("#build-log");
@@ -80,13 +98,21 @@
     statusEl.textContent = "";
     logEl.textContent = "";
     unsupportedEl.hidden = supported;
-    const saved = await storage.getSavedRoot().catch(() => null);
-    hasSavedRoot = !!saved;
-    // Only worth offering a choice once there's a *current* folder to
-    // rebuild from -- first-run setup has nothing to contrast "a different
-    // folder" against, so it stays a single button there.
-    chooseNewEl.hidden = !hasSavedRoot;
-    setBuilding(false);
+    // The picker flow and the Python-fallback form are mutually exclusive --
+    // exactly one is ever shown, based on File System Access API support.
+    chooseRowEl.hidden = !supported;
+    formEl.hidden = supported;
+    if (supported) {
+      const saved = await storage.getSavedRoot().catch(() => null);
+      hasSavedRoot = !!saved;
+      // Only worth offering a choice once there's a *current* folder to
+      // rebuild from -- first-run setup has nothing to contrast "a different
+      // folder" against, so it stays a single button there.
+      chooseNewEl.hidden = !hasSavedRoot;
+      setBuilding(false);
+    } else {
+      prefillServerPath();
+    }
     modalEl.hidden = false;
   }
 
@@ -179,6 +205,112 @@
     runBuild(pickNewHandle);
   });
 
+  // ---------------------------------------------------------------------
+  // Python fallback (Firefox/Safari/Brave-without-the-flag) -- only ever
+  // reached when the File System Access API isn't available. Talks to
+  // server.py's /api/build and /api/config, which only exist when this
+  // page is actually being served by `python app/server.py`; nothing
+  // above this point (the picker flow) touches any of it.
+  // ---------------------------------------------------------------------
+
+  // Best-effort: prefill the input with whatever install path server.py
+  // remembers from the last successful build. Silently does nothing if
+  // there's no server behind this page at all (e.g. someone reached this
+  // branch via the hosted static site).
+  function prefillServerPath() {
+    fetch("/api/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg) => {
+        if (cfg && cfg.installRoot && !pathInputEl.value) pathInputEl.value = cfg.installRoot;
+      })
+      .catch(() => {});
+  }
+
+  // build.py writes app/data.js as `window.ULMODBUDDY_DATA = <JSON>;` (the
+  // dataset itself is written via json.dump, so everything after that
+  // prefix is plain JSON, never arbitrary JS) -- fetched fresh (cache-
+  // busted) and JSON.parse()d directly rather than loaded as a <script>
+  // tag, since a newly inserted <script> can queue for a long time behind
+  // whatever same-origin requests (e.g. pending icon <img> loads) are
+  // already saturating the browser's per-host connection limit.
+  async function loadDataJs() {
+    const resp = await fetch("data.js?t=" + Date.now());
+    if (!resp.ok) throw new Error(`data.js not found (HTTP ${resp.status})`);
+    const text = await resp.text();
+    const marker = "window.ULMODBUDDY_DATA = ";
+    const idx = text.indexOf(marker);
+    if (idx === -1) throw new Error("data.js doesn't look like a UL Mod Buddy dataset");
+    let jsonText = text.slice(idx + marker.length).trim();
+    if (jsonText.endsWith(";")) jsonText = jsonText.slice(0, -1);
+    try {
+      return JSON.parse(jsonText);
+    } catch (e) {
+      throw new Error("data.js couldn't be parsed: " + e.message);
+    }
+  }
+
+  function setServerBuilding(isBuilding) {
+    pathInputEl.disabled = isBuilding;
+    submitEl.disabled = isBuilding;
+    submitEl.textContent = isBuilding ? "Building…" : "Build";
+  }
+
+  async function runServerBuild(installRoot) {
+    clearError();
+    setServerBuilding(true);
+    statusEl.textContent = "Building…";
+    logEl.textContent = "";
+    try {
+      const resp = await fetch("/api/build", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ installRoot }),
+      });
+      const body = await resp.json().catch(() => null);
+      if (body && body.log) body.log.forEach(appendLog);
+      if (!body || !body.ok) {
+        throw new Error((body && body.error) || `Build failed (HTTP ${resp.status}).`);
+      }
+      statusEl.textContent = "Build succeeded.";
+      if (allowCancel) {
+        // Same reasoning as the picker flow's runBuild(): app.js's event
+        // listeners are already registered this page load, so reload
+        // rather than risk double-registering them with a second init().
+        // Reloading also avoids fetching data.js while the page's own
+        // pending icon <img> requests are saturating the connection limit --
+        // a fresh page load has no such queue, so main()'s own loadDataJs()
+        // call picks up the new data.js cleanly.
+        statusEl.textContent = "Build succeeded — reloading…";
+        setTimeout(() => window.location.reload(), 600);
+      } else {
+        // First run: nothing has rendered yet, so there's no icon-request
+        // queue to compete with -- safe to fetch it directly here.
+        const dataset = await loadDataJs();
+        modalEl.hidden = true;
+        window.ULModBuddyApp.init(dataset);
+      }
+    } catch (err) {
+      statusEl.textContent = "";
+      showError(
+        "Build failed: " +
+          (err && err.message ? err.message : err) +
+          " -- make sure you're running this via `python app/server.py` and viewing it at that server's own URL (not a file opened directly, and not the hosted static site)."
+      );
+    } finally {
+      setServerBuilding(false);
+    }
+  }
+
+  formEl.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const path = pathInputEl.value.trim();
+    if (!path) {
+      showError("Enter a folder path first.");
+      return;
+    }
+    runServerBuild(path);
+  });
+
   async function main() {
     if (!storage || !builder) {
       document.getElementById("detail").textContent =
@@ -188,9 +320,25 @@
     const cached = await storage.getCachedDataset().catch(() => null);
     if (cached) {
       window.ULModBuddyApp.init(cached);
-    } else {
-      open({ allowCancel: false });
+      return;
     }
+    // Unsupported-browser returning visit: server.py may already have
+    // app/data.js on disk from a previous build (its own persistence,
+    // parallel to the picker flow's IndexedDB cache) -- load it directly
+    // rather than making a return visitor click through the form again.
+    // Falls through to the form on any failure (first run, no server.py
+    // behind this page, etc.), same as the picker flow falls through to
+    // its own first-run button.
+    if (!supported) {
+      try {
+        const dataset = await loadDataJs();
+        window.ULModBuddyApp.init(dataset);
+        return;
+      } catch (e) {
+        /* no existing data.js yet -- show the form below */
+      }
+    }
+    open({ allowCancel: false });
   }
 
   window.ULModBuddySetup = { open };

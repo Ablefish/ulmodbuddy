@@ -125,7 +125,9 @@ Click the column headers to re-sort by a different stat.
 ## Keeping the data current
 
 If you've updated the mod, or reinstalled it to a new location, click
-**Rebuild data** in the header to have the app pick that up. You get two
+**Rebuild data** in the header to have the app pick that up.
+
+If you're using the zero-install setup (Chrome or Edge), you get two
 choices:
 
 ![Rebuild data modal offering "Rebuild from current folder" or "Choose a different folder..."](docs/screenshots/rebuild-data-modal.png)
@@ -136,6 +138,10 @@ choices:
 - **Choose a different folder...** opens a fresh picker, for switching
   to a different install entirely (e.g. comparing a live install against
   a test/clone one).
+
+If you're using the Python fallback instead, **Rebuild data** brings back
+the same install-path form from setup -- edit the path if needed (or leave
+it as-is to rebuild from the same install) and click **Build**.
 
 The "built \<timestamp\> from UndeadLegacy X.Y.Z" line in the header shows
 the mod's own declared version, per its `ModInfo.xml` -- the mod's author

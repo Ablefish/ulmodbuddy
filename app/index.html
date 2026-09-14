@@ -12,7 +12,7 @@
        immediately on any page load regardless of cache state, so "which
        code am I actually running" is always answerable without opening
        devtools. Bump this by hand alongside each CHANGELOG.md/tag. -->
-  <span id="app-version" class="app-version" title="UL Mod Buddy build version (not the mod's own version, shown below)">v1.0.3</span>
+  <span id="app-version" class="app-version" title="UL Mod Buddy build version (not the mod's own version, shown below)">v1.0.4</span>
   <div id="meta-line" class="meta-line"></div>
   <button id="tree-btn" class="rebuild-btn" type="button" hidden
           title="Browse the research tree by category">Research Tree</button>
@@ -50,11 +50,10 @@
 </div>
 
 <!-- Research tree: <research> nodes grouped by their ultimate `parent`-chain
-     root -- see JP's 2026-09-13 "the in-game tabs aren't by station tier,
-     they're arbitrary category branches" call. Per JP's follow-up, one
-     category is ONE tree spanning all 3 station tiers in-game (never split
-     into 3), so the category picker selects a whole tree at once; tier is
-     shown only as each node's ring color (see the legend), not a splitter. -->
+     root. The in-game tabs are arbitrary category branches, not station
+     tiers -- one category is ONE tree spanning all 3 station tiers, so the
+     category picker selects a whole tree at once; tier is shown only as
+     each node's ring color (see the legend), not a splitter. -->
 <div id="tree-modal" class="modal-overlay" hidden>
   <div class="modal-card modal-card-wide">
     <div class="modal-header">
@@ -100,9 +99,15 @@
         currently don't. <strong>Brave</strong> ships the same engine as
         Chrome but disables this API by default -- enable it at
         <code>brave://flags/#file-system-access-api</code> and relaunch, or
-        just use Chrome/Edge. See the README for the alternative local-Python
-        setup.
+        just use Chrome/Edge. Otherwise, if you're running this page via
+        <code>python app/server.py</code> (see the README), use the form
+        below instead.
       </div>
+      <form id="build-form" hidden>
+        <input id="build-path-input" type="text" autocomplete="off"
+               placeholder="Path to your 7 Days To Die install, e.g. C:\7D2D\Custom\Undead_2.7.24">
+        <button id="build-submit" type="submit">Build</button>
+      </form>
       <div id="build-choose-row" class="build-choose-row">
         <button id="build-choose" type="button">Choose your install folder&hellip;</button>
         <button id="build-choose-new" type="button" hidden>Choose a different folder&hellip;</button>

@@ -206,9 +206,9 @@ main {
 }
 
 /* Selected rows use a dimmed fill of the kind's own color (see below), which
-   reads poorly under kind-colored text of the same hue -- JP's call: keep
-   the ring/chip border colored for identity, but force the name itself
-   back to the normal readable text color whenever its row is selected. */
+   reads poorly under kind-colored text of the same hue -- keep the
+   ring/chip border colored for identity, but force the name itself back to
+   the normal readable text color whenever its row is selected. */
 .result-row.selected .result-name {
   color: var(--text);
 }
@@ -216,10 +216,10 @@ main {
 /* Circular icon ring for a workstation shown as its own distinct thing (the
    results list) -- skipped wherever it's really just "an item" the way a
    normal ingredient is (the Ingredient Breakdown's nested tier requirement,
-   the Workstations panel's own rows), per JP's earlier call. Workstations
-   keep the icon-only ring since each tier genuinely is one specific block
-   with its own icon -- unlike research (see .research-chip below), there's
-   no "which icon" ambiguity to solve here. */
+   the Workstations panel's own rows). Workstations keep the icon-only ring
+   since each tier genuinely is one specific block with its own icon --
+   unlike research (see .research-chip below), there's no "which icon"
+   ambiguity to solve here. */
 img.icon-ring-workstation {
   border-radius: 50%;
   box-sizing: border-box;
@@ -232,8 +232,8 @@ img.icon-ring-workstation {
    AND the name together" -- reading more clearly as "this is a research
    node, a different kind of thing than the items around it" than a small
    ring on the icon alone did. Drawn as open-ended rules above and below
-   rather than a closed pill (JP's call): a full border pinched the icon's
-   square corners against the curve on the left, and leaving the ends open
+   rather than a closed pill: a full border pinches the icon's square
+   corners against the curve on the left, and leaving the ends open
    sidesteps that entirely instead of just padding around it. */
 .research-chip {
   display: inline-flex;
@@ -245,10 +245,10 @@ img.icon-ring-workstation {
   color: var(--direct);
   max-width: 100%;
 }
-/* Inside a results-list row the chip replaces what used to be the icon +
-   .result-name pair directly, so it needs to inherit their role as the
-   flexible, truncatable middle of the row (min-width: 0 is what lets the
-   name's own text-overflow: ellipsis kick in inside a flex child). */
+/* Inside a results-list row the chip replaces the icon + .result-name pair
+   directly, so it needs to inherit their role as the flexible, truncatable
+   middle of the row (min-width: 0 is what lets the name's own
+   text-overflow: ellipsis kick in inside a flex child). */
 .result-row .research-chip {
   flex: 1;
   min-width: 0;
@@ -272,9 +272,8 @@ img.icon-ring-workstation {
    the bottom of the report -- it's a running summary worth keeping visible
    while browsing, not something to scroll all the way down for. Empty (no
    report open yet) renders as nothing, so it doesn't eat space up front.
-   Grows with its content (JP's call) up to 75% of the viewport height, at
-   which point it scrolls internally rather than crowding out the results
-   list entirely. */
+   Grows with its content up to 75% of the viewport height, at which point
+   it scrolls internally rather than crowding out the results list entirely. */
 .totals-panel {
   flex-shrink: 0;
   max-height: 75vh;
@@ -293,8 +292,8 @@ img.icon-ring-workstation {
 }
 /* .section-label's base top margin (16px, meant for spacing below other
    content) reads as an oversized gap here, where it's the first thing in
-   the card -- per JP's call, the gap above the title should feel about the
-   same as the card's own left padding rather than towering over it. */
+   the card -- the gap above the title should feel about the same as the
+   card's own left padding rather than towering over it. */
 .totals-panel .section-label {
   margin-top: 0;
 }
@@ -491,8 +490,8 @@ img.icon-ring-workstation {
 }
 
 /* Fixed width + right-aligned so a row's name always starts at the same x
-   position regardless of how many digits its quantity has -- per JP's call,
-   "400x" was pushing its name further right than "1x" on a sibling row. */
+   position regardless of how many digits its quantity has -- otherwise
+   "400x" pushes its name further right than "1x" on a sibling row. */
 .ing-count {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
@@ -567,8 +566,8 @@ img.icon-ring-workstation {
 
 /* Pushes a name's acquisition badges to the right edge of whatever flex row
    they land in (the title row, an ingredient row, a tool row, ...) instead
-   of trailing directly after the name -- per JP's call, so the name itself
-   reads clearly instead of competing with a run of badges right next to it. */
+   of trailing directly after the name, so the name itself reads clearly
+   instead of competing with a run of badges right next to it. */
 .acq-badges {
   margin-left: auto;
   display: flex;
@@ -994,10 +993,47 @@ img.icon-ring-workstation {
   color: var(--text);
 }
 
+/* Python-fallback form (Firefox/Safari/Brave-without-the-flag) -- only
+   ever shown instead of .build-choose-row, never alongside it. */
+#build-form {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+#build-form[hidden] {
+  display: none;
+}
+#build-path-input {
+  flex: 1;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+#build-submit {
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+#build-submit:disabled,
+#build-path-input:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .build-choose-row {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+.build-choose-row[hidden] {
+  display: none;
 }
 #build-choose {
   background: var(--accent-dim);

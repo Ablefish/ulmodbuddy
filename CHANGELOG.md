@@ -3,6 +3,31 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.0.4] - 2026-09-14
+
+### Fixed
+
+- **The Python fallback (Firefox, Safari, or Brave without the File System
+  Access flag) works again.** A "point me at your install" form now shows
+  up automatically when the zero-install picker isn't available, backed by
+  `python app/server.py`. Both first-time builds and "Rebuild data" reload
+  cleanly; a rebuild reloads the page directly rather than re-fetching the
+  new dataset over a connection queue already busy with in-flight icon
+  requests, which previously made rebuilds hang.
+
+### Changed
+
+- **Comment cleanup pass across the whole codebase.** Comments now
+  describe what the code does and, briefly, why -- not the back-and-forth
+  of how it got there.
+- **README and GUIDE updated for accuracy on the Python fallback.** The
+  "No mod content is bundled" section now correctly distinguishes the
+  zero-install flow (nothing copied, referenced straight from your
+  install) from the Python fallback (icons copied to a local `app/icons`
+  folder, never committed or uploaded). "Keeping the data current" in the
+  guide now also covers the fallback's rebuild flow, not just the
+  Chrome/Edge picker.
+
 ## [1.0.3] - 2026-09-14
 
 ### Changed

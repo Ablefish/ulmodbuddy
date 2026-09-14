@@ -132,11 +132,10 @@ def configure_paths(install_root):
     ITEM_FILES = [CONFIG / "items.xml"] + sorted((CONFIG / "Custom").glob("items_*.xml"))
     BLOCK_FILES = [CONFIG / "blocks.xml"] + sorted((CONFIG / "Custom").glob("blocks_*.xml"))
     # Weapon/armor "mods" (attachments) are a completely separate schema
-    # (<item_modifier>, not <item>/<block>) in their own file -- missed
-    # entirely until JP's 2026-09-06 report that mods like "Launcher Damage
-    # Boost" had no icon: their real CustomIcon/Extends properties were
-    # sitting right there, just never scanned. Both the mod's own file and
-    # the base game's (vanilla mods Undead Legacy doesn't touch) matter.
+    # (<item_modifier>, not <item>/<block>) in their own file, with their own
+    # CustomIcon/Extends properties that need scanning like any other item.
+    # Both the mod's own file and the base game's (vanilla mods Undead
+    # Legacy doesn't touch) matter.
     MOD_ITEM_MODIFIERS_FILE = CONFIG / "item_modifiers.xml"
     BASE_ITEM_MODIFIERS_FILE = SRC / "Data" / "Config" / "item_modifiers.xml"
 
@@ -190,7 +189,16 @@ def load_mod_version():
     their local install, e.g. "Undead_22" -- meaningless to anyone else this
     tool gets shared with). Falls back to the folder name if ModInfo.xml is
     missing or unparseable, rather than failing the whole build over a
-    cosmetic label."""
+    cosmetic label.
+
+    Labeled "(per ModInfo.xml)" because this value is maintained by hand
+    by the mod's author and can lag behind the mod's real released
+    version. The real version is embedded in UndeadLegacy.dll instead, but
+    this reads ModInfo.xml only and does not parse the DLL, matching the
+    browser build (which can't read .dll files at all -- Chromium's File
+    System Access API hard-blocks them). ModInfo.xml is the mod's own
+    declared source, so it's used as-is and labeled by its source rather
+    than presented as authoritative."""
     modinfo = MOD_ROOT / "ModInfo.xml"
     if modinfo.exists():
         try:
@@ -199,7 +207,7 @@ def load_mod_version():
             name_el = el.find("Name")
             if version_el is not None and version_el.attrib.get("value"):
                 mod_name = name_el.attrib.get("value") if name_el is not None else "UndeadLegacy"
-                return f"{mod_name} {version_el.attrib['value']}"
+                return f"{mod_name} {version_el.attrib['value']} (per ModInfo.xml)"
         except ET.ParseError:
             pass
     return SRC.name
@@ -284,12 +292,9 @@ def scan_blocks(text, tag):
     # greedy quantifier, a self-closing tag (<x name="y"/>) lets the engine
     # try the "open tag ... later </x>" alternative before ever backtracking
     # to the correct short self-closing match, silently gobbling everything
-    # up to some unrelated LATER </x> (e.g. <lootgroup name="empty"/> was
-    # captured as one giant fragment spanning into the next several
-    # lootgroups). Didn't affect recipes/research/upgrades -- none of those
-    # happen to have self-closing entries -- but it's a real latent bug in
-    # this shared parser; found while adding the acquisition-channel parsing,
-    # which hits it constantly.
+    # up to some unrelated LATER </x> (e.g. a self-closing <lootgroup
+    # name="empty"/> would otherwise be captured as one giant fragment
+    # spanning into the next several lootgroups).
     pattern = re.compile(r"<" + tag + r"\b[^>]*?(?:/>|>.*?</" + tag + r">)", re.S)
     return pattern.findall(text)
 
@@ -305,11 +310,10 @@ def parse_fragment(fragment, source_label):
 
 # Every scanner in this file works on raw text via regex, not a real XML
 # parse -- so without stripping comments first, a <!-- DEPRECATED --> block
-# (found via JP's report of ulmStationDisassembly_1 showing up in the
-# harvest sources modal despite being fully commented out in blocks.xml)
-# reads as live content exactly like the real thing next to it. Safe here
-# even though it's not a general-purpose XML-comment stripper: this source
-# never nests comments or puts "-->" inside a literal attribute value.
+# would read as live content exactly like the real thing next to it (e.g. a
+# commented-out entry would still show up as if it were live data). Safe
+# here even though it's not a general-purpose XML-comment stripper: this
+# source never nests comments or puts "-->" inside a literal attribute value.
 _XML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 
 
@@ -539,10 +543,10 @@ def compute_unlocks(recipes, research, upgrades):
 # ---------------------------------------------------------------------------
 # Acquisition channels -- purchasable / lootable / rewardable
 #
-# Presence-only, per JP's 2026-09-04 scoping request: the question this
-# answers is just "can this item ever come from this channel at all", never
-# "how likely" -- so every prob/count/stage/quality attribute along the way
-# is deliberately ignored. Three source families, each shaped the same way
+# Presence-only: the question this answers is just "can this item ever come
+# from this channel at all", never "how likely" -- so every prob/count/
+# stage/quality attribute along the way is deliberately ignored. Three
+# source families, each shaped the same way
 # (a named group whose <item> children are either name="X", a leaf, or
 # group="Y", a reference to another group in the same family) rooted from a
 # different kind of "real" entry point:
@@ -663,10 +667,11 @@ def _parse_count_range(count_attr):
 
 def _expected_yield(s):
     """A single "how much do I actually get" number that blends chance and
-    count -- prob=1 count=3 should outrank prob=1 count="1,3" (JP's call:
-    "treat 3x higher than 1-3x"), and a guaranteed small drop should still be
-    weighable against a rare big one. Just the mean of a straightforward
-    model (roll `prob`, then a uniform count in range), nothing fancier."""
+    count -- prob=1 count=3 should outrank prob=1 count="1,3" (a guaranteed
+    3x should read as better than a 1-3x roll), and a guaranteed small drop
+    should still be weighable against a rare big one. Just the mean of a
+    straightforward model (roll `prob`, then a uniform count in range),
+    nothing fancier."""
     return s["prob"] * (s["countMin"] + s["countMax"]) / 2.0
 
 
@@ -684,9 +689,9 @@ def _collapse_tier_variants(sources, key="block"):
     """A block/item family that only differs by tier/quality number (see
     TIER_VARIANT_SUFFIX_RE) often yields the exact same materials regardless
     of tier -- e.g. every one of ulmGeneratorGasoline_1..7 drops identical
-    192 Scrap Iron despite very different power stats. Per JP's 2026-09-05
-    call, listing all 7 as separate sources is just noise; this collapses
-    any group that shares both a name root AND identical (event, countMin,
+    192 Scrap Iron despite very different power stats. Listing all 7 as
+    separate sources would just be noise, so this collapses any group that
+    shares both a name root AND identical (event, countMin,
     countMax, prob) down to one representative row (the lowest tier number,
     since that's the one most likely to have a plain, suffix-free display
     name/icon). A family whose tiers genuinely yield different amounts is
@@ -718,9 +723,8 @@ def _collapse_same_block_events(sources):
     10-15 Scrap Polymers whether you harvest it properly or destroy it some
     other way (explosives, gunfire, ...). Harvest/Destroy/Fall are
     alternative outcomes for one break event, never stacked -- so listing
-    them as two separate rows reads as "get this twice" when it's really
-    "get this either way" (JP's report, 2026-09-05: he read the Dew
-    Collector's two rows as additive). Collapses rows sharing the same block
+    them as two separate rows would read as "get this twice" when it's
+    really "get this either way". Collapses rows sharing the same block
     AND identical (countMin, countMax, prob) regardless of event into one,
     preferring the "Harvest" label when there's a choice since that's this
     app's default/no-annotation case. A block whose events genuinely differ
@@ -791,11 +795,11 @@ def load_harvest_sources():
         descending (see _expected_yield), and bucketed into a "tier" of
         "high"/"medium"/"low" *relative to the best source for that same
         item* (a flat percentage cutoff would be meaningless across items
-        whose drops range from single digits to the thousands) -- per JP's
-        call, so the app can render three sections without computing
-        anything itself, just grouping by this field.
-        count="0" is excluded (see load_harvestable's old docstring: it
-        means "explicitly does not drop here", not a real source); a name
+        whose drops range from single digits to the thousands), so the app
+        can render three sections without computing anything itself, just
+        grouping by this field.
+        count="0" is excluded: it means "explicitly does not drop here",
+        not a real source; a name
         that's ALSO positively dropped by some other block still ends up in
         the set via that other <drop>, so this only ever removes rows that
         are exclusively zero everywhere.
@@ -840,8 +844,8 @@ def _sort_and_tier_sources(sources_map, key):
     prob as tiebreak) and buckets each row into a "tier" of high/medium/low
     *relative to the best source for that same item* (a flat percentage
     cutoff would be meaningless across items whose yields range from single
-    digits to the thousands) -- per JP's call, so the app can render three
-    sections without computing anything itself, just grouping by this field.
+    digits to the thousands), so the app can render three sections without
+    computing anything itself, just grouping by this field.
     Shared by harvest and recycle sources; mutates in place."""
     for sources in sources_map.values():
         sources.sort(key=lambda s: (-_expected_yield(s), -s["prob"], s[key]))
@@ -861,8 +865,8 @@ def load_recycle_data():
         <recycle> entry lists several input items sharing an identical
         output profile (e.g. every tire size recycles the same way), so
         this expands that comma-separated list to one entry per input name.
-        Shown directly on an item's own page (JP's 2026-09-05 call) --
-        there's exactly one such list per item, no "best source" question,
+        Shown directly on an item's own page: there's exactly one such
+        list per item, no "best source" question,
         so unlike recycle_sources these rows are left in source order.
       - recycle_sources: {output_item: [{item: input_name, countMin,
         countMax, prob, tier}, ...]} -- the reverse index (what can I
@@ -928,15 +932,14 @@ def load_recycle_data():
 # ---------------------------------------------------------------------------
 # Vehicles -- <item>/<set xpath="...item[@name='X']"> in items_vehicles.xml
 # ---------------------------------------------------------------------------
-# Stats live entirely outside the recipe/research/acquisition system JP's
-# reports have been mapping so far, in their own file. Found while answering
-# JP's 2026-09-12 "which car has the most storage" question: neither the
-# five buildable vehicles (which DO have real recipes, e.g.
-# ulmVehicleMinibikeOld) nor the dozen-plus "find it broken down in the
-# world and repair it" cars (which have no recipe/research/acquisition
-# entry of their own at all -- a wrecked Sedan is placed directly in POI
-# prefabs, a channel this tool doesn't model) ever surfaced a Cargo
-# Capacity, Repair Kit tier, or Weight anywhere in the app.
+# Vehicle stats live entirely outside the recipe/research/acquisition
+# system, in their own file. Neither the five buildable vehicles (which DO
+# have real recipes, e.g. ulmVehicleMinibikeOld) nor the dozen-plus "find it
+# broken down in the world and repair it" cars (which have no recipe/
+# research/acquisition entry of their own at all -- a wrecked Sedan is
+# placed directly in POI prefabs, a channel this tool doesn't model) surface
+# a Cargo Capacity, Repair Kit tier, or Weight through that system, so those
+# stats are read from here instead.
 _VEHICLE_STAT_FIELDS = ("cargoCapacity", "repairTool", "weight", "param1",
                         "maintenanceGroup", "modSlots", "degradationMax", "entityName")
 
@@ -944,8 +947,7 @@ _VEHICLE_STAT_FIELDS = ("cargoCapacity", "repairTool", "weight", "param1",
 def load_vehicle_speeds():
     """Returns {entity_name: topSpeed} -- the un-boosted "hold forward, no
     sprint" speed (the first of the four velocityMax_turbo values: forward,
-    backward, turbo-forward, turbo-backward -- see JP's 2026-09-06 "does
-    Undead Legacy feel slower than vanilla" investigation).
+    backward, turbo-forward, turbo-backward).
 
     The base game's own vehicles.xml is read first (every entity, mod-
     touched or not, is fully defined there), then the mod's is layered on
@@ -1013,7 +1015,7 @@ def load_vehicles():
         the comment where it's built, below.
 
     Paint-swap variants (e.g. 13 recolors of the same Sedan, all sharing one
-    localization string -- confirmed against English.txt) never define
+    localization string) never define
     these stats themselves; they just <property name="Extends" value="..."/>
     the first-listed color and add a paint-only Meshfile/VehicleWheels
     tweak. Rather than show 13 indistinguishable rows, only names that
@@ -1060,11 +1062,11 @@ def load_vehicles():
                     # means. Ratio to `weight` is a clean 2-4x for the
                     # simple vehicles (bicycle/minibike/motorcycle) but 10-30x
                     # for cars/trucks/aircraft, which rules out both "tow
-                    # capacity" and "inventory slot count" (JP's and Claude's
-                    # guesses, 2026-09-12) -- a slot count of 6000 for a
-                    # Military Truck isn't plausible under any grid size.
-                    # Exposed as the raw attribute name rather than a
-                    # confident but possibly-wrong label.
+                    # capacity" and "inventory slot count" as explanations --
+                    # a slot count of 6000 for a Military Truck isn't
+                    # plausible under any grid size. Exposed as the raw
+                    # attribute name rather than a confident but
+                    # possibly-wrong label.
                     d["param1"] = prop.attrib.get("param1")
                 elif pname == "Vehicle":
                     # <property class="Action1"><property name="Vehicle"
@@ -1107,8 +1109,7 @@ def load_vehicles():
     # Every recolor is independently purchasable/lootable in its own right
     # (a trader can roll any paint job), so without this it would surface as
     # its own separate, data-less "item" page sharing the exact same display
-    # name as its representative -- found via JP's 2026-09-13 report that
-    # clicking "Renegade" sometimes landed on a blank page: 14 different
+    # name as its representative -- e.g. 14 different
     # ulmVehicleMotorcycle03<Color> names are all independently purchasable
     # and all display as "Renegade", and only one of them is the
     # ulmVehicleMotorcycle03White representative actually in `vehicles`
@@ -1142,9 +1143,8 @@ def _index_vehicle_block_join_keys():
     for a single fixed item, e.g. the Ambulance; ItemPrefix for one of
     several paint-variant items sharing that prefix, e.g. "ulmVehicleSedan03"
     + whichever color the world roll picked). This is the mod's own
-    authoritative join key -- found while tracing why the Renegade
-    motorcycle had no recipe (JP's 2026-09-12 question) -- so
-    load_vehicle_repairs() below never has to guess a name mapping."""
+    authoritative join key, so load_vehicle_repairs() below never has to
+    guess a name mapping."""
     keys = {}
     if not VEHICLE_BLOCKS_FILE.exists():
         warn(f"missing expected file: {VEHICLE_BLOCKS_FILE}")
@@ -1244,16 +1244,14 @@ def load_vehicle_repairs(vehicle_names):
 # Must include "block" alongside "item"/"set"/"append": a full <block
 # name="X"> definition (not just a patch) can carry its own CustomIcon too --
 # e.g. ulmElectricWireRelayVariantHelper is a full <block> with
-# CustomIcon="ulmElectricWireRelay". Missing "block" here silently dropped
-# ~369 CustomIcon overrides across the dataset (found via user bug report on
-# "Tall Wire Relay").
+# CustomIcon="ulmElectricWireRelay". Omitting "block" here would silently
+# drop ~369 CustomIcon overrides across the dataset.
 #
 # "item_modifier" (weapon/armor mods -- a completely different tag, not a
-# kind of <item>) added per JP's 2026-09-06 report: the backreference
-# `</\1>` still closes correctly whichever alternative actually matched, so
-# this one addition covers <item_modifier> everywhere ITEM_BLOCK_RE is used
-# (CustomIcon AND Extends scanning both, since load_extends_graph() reuses
-# this same regex).
+# kind of <item>) is included too: the backreference `</\1>` still closes
+# correctly whichever alternative actually matched, so this one addition
+# covers <item_modifier> everywhere ITEM_BLOCK_RE is used (CustomIcon AND
+# Extends scanning both, since load_extends_graph() reuses this same regex).
 # ---------------------------------------------------------------------------
 ITEM_BLOCK_RE = re.compile(
     r"<(item_modifier|item|set|append|block)\s+"
@@ -1372,12 +1370,11 @@ def load_variant_helper_candidates():
 #     e.g. cntCar03SedanDamage2Master owns the real <drop> table, but only
 #     its ~10 differently-skinned, individually-named v01..v08 variants are
 #     ever actually spawned.
-# Found via JP's 2026-09-05 report of raw internal names showing up in the
-# harvest sources modal (and, per JP, "periodically" elsewhere too -- any
-# consumer of `names` benefits from this, not just harvest). Genuine gaps
-# with no resolvable Extends chain either way (e.g. ulmTrashBin01Black_C_Open)
-# are left as-is: this fills real gaps from real nearby data, it doesn't
-# invent names.
+# Without this, raw internal names can show up anywhere a display name is
+# expected (not just the harvest sources modal) -- any consumer of `names`
+# benefits from this fallback. Genuine gaps with no resolvable Extends chain
+# either way (e.g. ulmTrashBin01Black_C_Open) are left as-is: this fills
+# real gaps from real nearby data, it doesn't invent names.
 # ---------------------------------------------------------------------------
 def load_extends_graph():
     """Returns (extends_map, children_map): every item/block's own `Extends`
@@ -1639,9 +1636,8 @@ def main(install_root):
         # by upgrades.keys() above -- but `next` (the TO tier) is never a key
         # itself unless something later upgrades FROM it too. A family's
         # topmost tier is only ever a `next`, never a `block`, so without
-        # this it silently never got its own icon resolved even when the
-        # source atlas has one (found via JP's bug report: every station
-        # family's last tier showed no icon at all).
+        # this it would never get its own icon resolved even when the
+        # source atlas has one.
         if up["next"]:
             all_names.add(up["next"])
         for ing in up["ingredients"]:
@@ -1663,13 +1659,11 @@ def main(install_root):
         for o in sources:
             all_names.add(o["name"])
     # Anything ONLY ever reachable by buying/looting/quest-reward (never a
-    # recipe ingredient/output, harvest source, or recycle name) was never
-    # folded into all_names before -- so vehicles, perk books, and loot
-    # bundles (all mostly purchasable/lootable/rewardable-only) never got an
-    # icon lookup attempted at all, even when a perfectly good one exists in
-    # an atlas. Found via JP's 2026-09-06 report after the "item" browsing
-    # kind made these names visible for the first time and their missing
-    # icons became obvious.
+    # recipe ingredient/output, harvest source, or recycle name) needs to be
+    # folded into all_names explicitly -- otherwise vehicles, perk books, and
+    # loot bundles (all mostly purchasable/lootable/rewardable-only) would
+    # never get an icon lookup attempted at all, even when a perfectly good
+    # one exists in an atlas.
     all_names |= purchasable | lootable | rewardable
 
     print("Loading weapon/armor mods (item_modifiers.xml)...")

@@ -30,17 +30,13 @@ _build_lock = threading.Lock()
 
 
 class ULModBuddyRequestHandler(SimpleHTTPRequestHandler):
-    # Only data.js needs to be forced fresh -- it's the one file "Rebuild
-    # data" must guarantee shows up immediately, with no stale copy served
-    # from anywhere. Applying that same no-store to every response (the
-    # original blanket version of this override) meant every one of the
-    # 2000+ icon requests in a session got a full re-transfer with zero
-    # caching allowed, ever -- found via JP's 2026-09-13 "why do icons feel
-    # slow after a cache clear" question. Everything else keeps
-    # SimpleHTTPRequestHandler's normal Last-Modified/conditional-GET
-    # behavior, which already serves a fast 304 for anything unchanged, and
-    # still correctly detects a real change (shutil.copyfile always bumps
-    # the destination's mtime to copy time -- see build.py's icon copy).
+    # Only data.js is forced fresh -- it's the one file "Rebuild data" must
+    # guarantee shows up immediately, with no stale copy served from
+    # anywhere. Everything else keeps SimpleHTTPRequestHandler's normal
+    # Last-Modified/conditional-GET behavior, so icon requests still get a
+    # fast 304 when unchanged (shutil.copyfile always bumps the
+    # destination's mtime to copy time -- see build.py's icon copy -- so a
+    # real change is still correctly detected).
     def end_headers(self):
         if self.path.startswith("/data.js"):
             self.send_header("Cache-Control", "no-store")

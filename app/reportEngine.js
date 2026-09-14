@@ -1,11 +1,10 @@
-// UL Mod Buddy -- Total Requirements Report engine, v2.
+// UL Mod Buddy -- Total Requirements Report engine.
 //
 // Pure logic, no DOM dependency, so it can be loaded in the browser app AND
 // required directly under Node for automated verification against a real
 // built data.js (see verify_report.js).
 //
-// Two separate passes over the same dependency graph, per JP's 2026-09-03
-// design request (this replaces the single combined-tree v1):
+// Two separate passes over the same dependency graph:
 //
 //   1. CONSTRUCTION COSTS -- "if all research were known and all
 //      workstations already built, what does it cost to make N of this?"
