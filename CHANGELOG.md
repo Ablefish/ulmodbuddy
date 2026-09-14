@@ -3,6 +3,26 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.0.1] - 2026-09-14
+
+### Fixed
+
+- **The version shown in the header now reflects the mod's real release**,
+  not a stale number. `ModInfo.xml`'s `<Version>` is maintained by hand and
+  had drifted out of date (it read 2.7.01 against an actual 2.7.24
+  install). The real version turns out to be readable from a different
+  source: `UndeadLegacy.dll` embeds it as three length-prefixed strings in
+  the compiled assembly, evidently written by the mod's own build tooling
+  on every release. The app now reads that instead, falling back to
+  `ModInfo.xml` if a future build ever lays it out differently.
+
+### Added
+
+- A **desktop-only** disclaimer in the README and User Guide -- neither
+  has been tested on mobile, and the zero-install setup flow's File
+  System Access API dependency means it likely won't work on most mobile
+  browsers yet regardless.
+
 ## [1.0.0] - 2026-09-14
 
 First tagged release. UL Mod Buddy started as a local-only Python tool;
