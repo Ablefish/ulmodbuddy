@@ -3,11 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <title>UL Mod Buddy</title>
-<link rel="stylesheet" href="styles.css?dev=26">
+<link rel="stylesheet" href="styles.css?dev=27">
 </head>
 <body>
 <header>
   <h1>UL Mod Buddy</h1>
+  <!-- Static markup, not derived from the built dataset -- visible
+       immediately on any page load regardless of cache state, so "which
+       code am I actually running" is always answerable without opening
+       devtools. Bump this by hand alongside each CHANGELOG.md/tag. -->
+  <span id="app-version" class="app-version" title="UL Mod Buddy build version (not the mod's own version, shown below)">v1.0.1</span>
   <div id="meta-line" class="meta-line"></div>
   <button id="tree-btn" class="rebuild-btn" type="button" hidden
           title="Browse the research tree by category">Research Tree</button>
@@ -114,7 +119,7 @@
      whenever a stale browser cache serves an old copy of one of these
      mid-session. Harmless to ship, but fine to drop before a real release. -->
 <script src="reportEngine.js?dev=5"></script>
-<script src="build.js?dev=4"></script>
+<script src="build.js?dev=5"></script>
 <script src="storage.js?dev=2"></script>
 <script src="app.js?dev=54"></script>
 <script src="setup.js?dev=5"></script>

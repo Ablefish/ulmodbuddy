@@ -220,9 +220,13 @@ window.ULModBuddyBuilder = (function () {
   // just as easily go stale) and validates the trailing string actually
   // looks like a version before trusting it -- ModInfo.xml is still the
   // fallback if a future build lays this out differently.
+  // Returns a {version} on success, or a {reason} explaining exactly which
+  // step came up empty -- loadModVersion logs this either way so "why did
+  // it fall back to ModInfo.xml" is answerable from the in-app build log,
+  // not just guesswork.
   async function readDllEmbeddedVersion(paths) {
     const handle = await tryGetFile(paths.modRoot, "UndeadLegacy.dll");
-    if (!handle) return null;
+    if (!handle) return { reason: "UndeadLegacy.dll not found next to ModInfo.xml" };
     try {
       const buf = new Uint8Array(await (await handle.getFile()).arrayBuffer());
       const name1 = new TextEncoder().encode("UndeadLegacy");
@@ -233,19 +237,26 @@ window.ULModBuddyBuilder = (function () {
       anchor[1 + name1.length] = name2.length;
       anchor.set(name2, 1 + name1.length + 1);
       const idx = indexOfBytes(buf, anchor);
-      if (idx === -1) return null;
+      if (idx === -1) {
+        return { reason: `anchor bytes not found in UndeadLegacy.dll (${buf.length} bytes read)` };
+      }
       const versionLenIdx = idx + anchor.length;
       const versionLen = buf[versionLenIdx];
-      if (!versionLen || versionLen > 32) return null;
+      if (!versionLen || versionLen > 32) {
+        return { reason: `anchor found at byte ${idx}, but the length byte after it (${versionLen}) is out of range` };
+      }
       const versionBytes = buf.slice(versionLenIdx + 1, versionLenIdx + 1 + versionLen);
       const version = new TextDecoder("utf-8").decode(versionBytes);
-      return /^\d+(\.\d+){1,3}$/.test(version) ? version : null;
+      if (!/^\d+(\.\d+){1,3}$/.test(version)) {
+        return { reason: `anchor found at byte ${idx}, but what followed ("${version}") doesn't look like a version` };
+      }
+      return { version };
     } catch (e) {
-      return null;
+      return { reason: `error reading UndeadLegacy.dll: ${e && e.message ? e.message : e}` };
     }
   }
 
-  async function loadModVersion(paths) {
+  async function loadModVersion(paths, log) {
     let modName = "UndeadLegacy";
     let xmlVersion = null;
     const modInfoHandle = await tryGetFile(paths.modRoot, "ModInfo.xml");
@@ -263,8 +274,13 @@ window.ULModBuddyBuilder = (function () {
         /* fall through */
       }
     }
-    const dllVersion = await readDllEmbeddedVersion(paths);
-    const version = dllVersion || xmlVersion;
+    const dllResult = await readDllEmbeddedVersion(paths);
+    if (dllResult.version) {
+      log(`  mod version: ${dllResult.version} (read from UndeadLegacy.dll)`);
+    } else {
+      log(`  mod version: couldn't read from UndeadLegacy.dll (${dllResult.reason}) -- falling back to ModInfo.xml (${xmlVersion || "not found"})`);
+    }
+    const version = dllResult.version || xmlVersion;
     if (version) return `${modName} ${version}`;
     return "your install"; // no directory handle exposes its own folder name reliably across browsers
   }
@@ -1488,7 +1504,7 @@ window.ULModBuddyBuilder = (function () {
     const dataset = {
       meta: {
         builtAt: new Date().toISOString(),
-        sourceVersion: await loadModVersion(paths),
+        sourceVersion: await loadModVersion(paths, log),
         counts: {
           recipes: Object.keys(recipes).length,
           recipeItemNames: Object.keys(recipesByName).length,

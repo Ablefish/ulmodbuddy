@@ -56,6 +56,15 @@ header h1 {
   font-size: 12px;
 }
 
+.app-version {
+  color: var(--text-dim);
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: default;
+}
+
 main {
   display: flex;
   height: calc(100vh - 53px);
