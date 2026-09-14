@@ -39,6 +39,10 @@ window.ULModBuddyApp = (function () {
   const treeModalCloseEl = $("#tree-modal-close");
   const treeCategorySelectEl = $("#tree-category-select");
   const treeCanvasWrapEl = $("#tree-canvas-wrap");
+  const treeCanvasInnerEl = $("#tree-canvas-inner");
+  const treeZoomInEl = $("#tree-zoom-in");
+  const treeZoomOutEl = $("#tree-zoom-out");
+  const treeZoomResetEl = $("#tree-zoom-reset");
 
   // ---------------------------------------------------------------------
   // Meta line
@@ -577,9 +581,88 @@ window.ULModBuddyApp = (function () {
   }
 
   const treeState = { root: null };
+  // Pan/zoom is plain CSS transform on tree-canvas-inner, driven entirely
+  // from here -- .tree-canvas-wrap has no native scrollbars (overflow:
+  // hidden) so this is the only way to navigate a tree bigger than the
+  // viewport. Natural (untransformed) pixel size of the current SVG, needed
+  // to compute a fit-to-view scale -- read off the rendered <svg>'s own
+  // width/height attributes rather than recomputed, so this never drifts
+  // out of sync with renderResearchTreeSvg's own math.
+  const treeView = { scale: 1, x: 0, y: 0 };
+  let treeNaturalWidth = 0;
+  let treeNaturalHeight = 0;
+
+  function clampTreeScale(s) {
+    return Math.min(5, Math.max(0.15, s));
+  }
+
+  // No pulling the tree past its own edges: centers it on whichever axis
+  // the (scaled) content is smaller than the viewport, and otherwise caps
+  // panning so the content's edge can reach the viewport's edge but never
+  // pull away from it into empty space.
+  function clampTreePan() {
+    const wrapW = treeCanvasWrapEl.clientWidth;
+    const wrapH = treeCanvasWrapEl.clientHeight;
+    const contentW = treeNaturalWidth * treeView.scale;
+    const contentH = treeNaturalHeight * treeView.scale;
+    treeView.x =
+      contentW <= wrapW ? (wrapW - contentW) / 2 : Math.min(0, Math.max(wrapW - contentW, treeView.x));
+    treeView.y =
+      contentH <= wrapH ? (wrapH - contentH) / 2 : Math.min(0, Math.max(wrapH - contentH, treeView.y));
+  }
+
+  function applyTreeTransform() {
+    clampTreePan();
+    treeCanvasInnerEl.style.transform = `translate(${treeView.x}px, ${treeView.y}px) scale(${treeView.scale})`;
+    // CSS transform only ever changes paint position, never layout size --
+    // tree-canvas-inner's actual (untransformed) layout box is the full
+    // natural size of the tree, e.g. 2000px+ square, vastly bigger than
+    // tree-canvas-wrap. overflow:hidden stops the user from scrolling that
+    // via wheel/scrollbar, but the wrap is still technically scrollable, so
+    // clicking a +/-/Fit button focuses it and the browser's default
+    // focus-scroll-into-view kicks in, silently offsetting scrollTop/Left
+    // out from under this transform. Zeroing them every update is what
+    // actually keeps the pan/zoom math and the visible result in sync.
+    treeCanvasWrapEl.scrollTop = 0;
+    treeCanvasWrapEl.scrollLeft = 0;
+  }
+
+  // Default view: the whole tree fit to the viewport's width (never
+  // upscaled past 1x for a tree that's already smaller than the viewport).
+  // x/y just need a starting value here -- clampTreePan() (inside
+  // applyTreeTransform) does the actual centering/bounding. Re-run every
+  // time the modal opens, not just on first render, so a window resize
+  // while it was closed doesn't leave a stale fit.
+  function fitTreeView() {
+    const wrapW = treeCanvasWrapEl.clientWidth;
+    if (!treeNaturalWidth || !wrapW) return;
+    treeView.scale = clampTreeScale(Math.min(wrapW / treeNaturalWidth, 1));
+    treeView.x = 0;
+    treeView.y = 0;
+    applyTreeTransform();
+  }
+
+  // Rescales around a fixed screen point (clientX/clientY) -- the point
+  // under the cursor (wheel zoom) or the viewport's own center (+/-
+  // buttons) stays visually still while everything around it scales.
+  function zoomTreeAt(factor, clientX, clientY) {
+    const rect = treeCanvasWrapEl.getBoundingClientRect();
+    const px = clientX - rect.left;
+    const py = clientY - rect.top;
+    const canvasX = (px - treeView.x) / treeView.scale;
+    const canvasY = (py - treeView.y) / treeView.scale;
+    treeView.scale = clampTreeScale(treeView.scale * factor);
+    treeView.x = px - canvasX * treeView.scale;
+    treeView.y = py - canvasY * treeView.scale;
+    applyTreeTransform();
+  }
 
   function renderTreeCanvas() {
-    treeCanvasWrapEl.innerHTML = renderResearchTreeSvg(treeState.root);
+    treeCanvasInnerEl.innerHTML = renderResearchTreeSvg(treeState.root);
+    const svg = treeCanvasInnerEl.querySelector("svg");
+    treeNaturalWidth = svg ? parseFloat(svg.getAttribute("width")) || 0 : 0;
+    treeNaturalHeight = svg ? parseFloat(svg.getAttribute("height")) || 0 : 0;
+    fitTreeView();
   }
 
   function selectTreeCategory(root) {
@@ -598,8 +681,11 @@ window.ULModBuddyApp = (function () {
         .map((root) => `<option value="${root}">${displayName(root)} (${researchTreeGroups.get(root).length})</option>`)
         .join("");
     }
-    if (!treeState.root) selectTreeCategory(researchCategories[0]);
+    // Shown before selecting/fitting -- fitTreeView() needs the wrap's real
+    // (non-zero) on-screen size, which a `hidden` element doesn't have.
     treeModalEl.hidden = false;
+    if (!treeState.root) selectTreeCategory(researchCategories[0]);
+    else fitTreeView();
   }
 
   treeBtnEl.addEventListener("click", openTreeModal);
@@ -608,13 +694,92 @@ window.ULModBuddyApp = (function () {
     if (e.target === treeModalEl) hideTreeModal();
   });
   treeCategorySelectEl.addEventListener("change", () => selectTreeCategory(treeCategorySelectEl.value));
+
+  treeZoomInEl.addEventListener("click", () => {
+    const rect = treeCanvasWrapEl.getBoundingClientRect();
+    zoomTreeAt(1.25, rect.left + rect.width / 2, rect.top + rect.height / 2);
+  });
+  treeZoomOutEl.addEventListener("click", () => {
+    const rect = treeCanvasWrapEl.getBoundingClientRect();
+    zoomTreeAt(1 / 1.25, rect.left + rect.width / 2, rect.top + rect.height / 2);
+  });
+  treeZoomResetEl.addEventListener("click", fitTreeView);
+
+  treeCanvasWrapEl.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      zoomTreeAt(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX, e.clientY);
+    },
+    { passive: false }
+  );
+
+  // Click-drag panning via Pointer Events -- one code path for mouse,
+  // touch, and pen. dragMoved distinguishes an actual drag from a plain
+  // click (which should still jump to the clicked node, see below) using a
+  // small pixel threshold so a slightly-shaky click isn't mistaken for one.
+  //
+  // Navigation deliberately does NOT use a "click" listener: setPointerCapture
+  // below (needed so a drag that leaves the wrap's bounds keeps tracking)
+  // makes the browser retarget the eventual click event to whatever element
+  // captured the pointer -- tree-canvas-wrap itself, never the node actually
+  // under the cursor. That silently broke node-click navigation entirely
+  // (found via JP's 2026-09-14 report), the same root cause fixed for the
+  // +/-/Fit buttons by excluding them from capture -- but nodes can't just be
+  // excluded the same way, since a drag gesture routinely starts on top of
+  // one. Instead, the node (if any) is captured on pointerdown, before
+  // capture can retarget anything, and acted on on pointerup if the pointer
+  // never actually moved.
+  let treeDragging = false;
+  let treeDragMoved = false;
+  let treeDragStartClientX = 0;
+  let treeDragStartClientY = 0;
+  let treeDragStartX = 0;
+  let treeDragStartY = 0;
+  let treePointerDownNode = null;
+
+  treeCanvasWrapEl.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    // Pointer capture (below) retargets the eventual click to whatever
+    // element it's captured on -- without this check, starting a drag
+    // capture on every pointerdown silently ate every click on the +/-/Fit
+    // buttons, since the browser would then fire their "click" at
+    // tree-canvas-wrap instead of the button itself.
+    if (e.target.closest(".tree-zoom-controls")) return;
+    treePointerDownNode = e.target.closest(".tree-node");
+    treeDragging = true;
+    treeDragMoved = false;
+    treeDragStartClientX = e.clientX;
+    treeDragStartClientY = e.clientY;
+    treeDragStartX = treeView.x;
+    treeDragStartY = treeView.y;
+    treeCanvasWrapEl.classList.add("tree-dragging");
+    treeCanvasWrapEl.setPointerCapture(e.pointerId);
+  });
+  treeCanvasWrapEl.addEventListener("pointermove", (e) => {
+    if (!treeDragging) return;
+    const dx = e.clientX - treeDragStartClientX;
+    const dy = e.clientY - treeDragStartClientY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) treeDragMoved = true;
+    treeView.x = treeDragStartX + dx;
+    treeView.y = treeDragStartY + dy;
+    applyTreeTransform();
+  });
   // Clicking a node jumps to its real page, same as any other cross-reference
   // in the app -- the tree is a navigation aid, not a separate mini-app.
-  treeCanvasWrapEl.addEventListener("click", (e) => {
-    const g = e.target.closest(".tree-node");
-    if (!g) return;
-    hideTreeModal();
-    window.__cookbookJump(g.dataset.name);
+  // Only fires for a plain click (no real movement in between), and only
+  // for the node the gesture actually started on.
+  treeCanvasWrapEl.addEventListener("pointerup", (e) => {
+    treeDragging = false;
+    treeCanvasWrapEl.classList.remove("tree-dragging");
+    if (!treeDragMoved && treePointerDownNode) {
+      hideTreeModal();
+      window.__cookbookJump(treePointerDownNode.dataset.name);
+    }
+  });
+  treeCanvasWrapEl.addEventListener("pointercancel", () => {
+    treeDragging = false;
+    treeCanvasWrapEl.classList.remove("tree-dragging");
   });
 
   document.addEventListener("keydown", (e) => {
