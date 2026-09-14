@@ -3,6 +3,34 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.0.2] - 2026-09-14
+
+### Changed
+
+- **Reverts v1.0.1's DLL-reading approach for the mod version.** It
+  turned out to be a dead end, not just an untested edge case: Chromium's
+  File System Access API hard-blocks reading `.dll` files at all (a fixed
+  security restriction, confirmed via the exact browser error --
+  `"Name is not allowed"` -- against two real installs), so it could never
+  have worked for anyone. The header now shows `ModInfo.xml`'s version
+  plainly labeled "(per ModInfo.xml)", with a hover tooltip noting the
+  mod's author doesn't always update it on every release, rather than
+  presenting a number that can't actually be kept current as if it were
+  authoritative.
+
+### Added
+
+- A small **`vX.Y.Z` badge** next to the app's own title (not the mod's
+  version) -- static markup, visible immediately on any page load
+  regardless of cache state, so "which build am I actually looking at" is
+  answerable at a glance. This is what surfaced the v1.0.1 problem in the
+  first place: without it, a stale cached build and a genuinely broken
+  fix looked identical from the outside.
+- A short explanation under **One-Time Totals** clarifying that expanding
+  a workstation, tool, or research step (not just an ingredient) adds its
+  own cost to the running total too -- leaving something collapsed is what
+  marks it "I already have this."
+
 ## [1.0.1] - 2026-09-14
 
 ### Fixed

@@ -131,6 +131,12 @@ version, click **Rebuild data** in the header. You get two choices:
   to a different install entirely (e.g. comparing a live install against
   a test/clone one).
 
+The "built \<timestamp\> from UndeadLegacy X.Y.Z" line in the header shows
+the mod's own declared version, per its `ModInfo.xml` -- the mod's author
+doesn't always update that file on every release, so this number can lag
+behind whatever version the game itself displays. Hover over the line for
+a reminder of this.
+
 ## Build warnings
 
 If you see an "N build warning(s)" link next to the header's summary

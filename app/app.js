@@ -55,6 +55,11 @@ window.ULModBuddyApp = (function () {
     metaHtml += ` -- <button class="meta-warnings-btn" onclick="window.__cookbookShowWarnings()">${data.meta.warnings.length} build warning(s)</button>`;
   }
   metaEl.innerHTML = metaHtml;
+  // ModInfo.xml's <Version> is maintained by hand and can lag behind an
+  // actual release (confirmed against two real installs, 2026-09-14) --
+  // the number itself already says "(per ModInfo.xml)"; this just spells
+  // out why on hover, rather than crowding the header line with it.
+  metaEl.title = "The mod version above is read from the mod's own ModInfo.xml, which its author doesn't always update on every release -- it may not match what the game itself displays.";
 
   rebuildBtnEl.hidden = false;
   rebuildBtnEl.addEventListener("click", () => window.ULModBuddySetup.open({ allowCancel: true }));
@@ -1517,10 +1522,11 @@ window.ULModBuddyApp = (function () {
   // A rolled-up material list, used both for the per-craft construction
   // total and for the one-time research/workstation/tool total. Same shape,
   // different meaning, so it gets one renderer and two call sites.
-  function renderTotalsCard(title, totalsMap, emptyLabel) {
+  function renderTotalsCard(title, totalsMap, emptyLabel, subtitle) {
     const rows = [...totalsMap.entries()].sort((a, b) => b[1] - a[1]);
     let html = `<div class="variant-card">`;
     html += `<div class="section-label">${title}${rows.length ? ` (${rows.length} distinct)` : ""}</div>`;
+    if (subtitle) html += `<div class="req-flag-dim totals-subtitle">${subtitle}</div>`;
     if (rows.length) {
       html += `<ul class="ingredient-list">`;
       html += rows
@@ -1617,7 +1623,12 @@ window.ULModBuddyApp = (function () {
     for (const [k, v] of report.constructionTotals) {
       combined.set(k, (combined.get(k) || 0) + v);
     }
-    panel.innerHTML = renderTotalsCard("One-Time Totals", combined, "None currently expanded.");
+    panel.innerHTML = renderTotalsCard(
+      "One-Time Totals",
+      combined,
+      "Nothing expanded yet -- everything above is assumed already in hand.",
+      "Expanding a workstation, tool, or research step adds its own cost here too, same as an ingredient -- leaving it collapsed means “I already have this.”"
+    );
   }
 
   function renderReportBody() {

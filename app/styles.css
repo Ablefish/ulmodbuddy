@@ -692,6 +692,10 @@ img.icon-ring-workstation {
   font-size: 11px;
 }
 
+.totals-subtitle {
+  margin: 2px 0 10px;
+}
+
 /* ---------------------------------------------------------------------
    Harvest sources modal -- opened from an item's Harvest acquisition
    badge, rendering the pre-built block/count/chance list from
