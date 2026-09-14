@@ -58,11 +58,28 @@ window.ULModBuddyStorage = (function () {
     });
   }
 
+  // A dataset's `icons` values are blob: URLs, which are only valid for the
+  // document that minted them -- one read back verbatim from a previous
+  // page load is already dead. The actual bytes survive fine in IndexedDB
+  // as `iconBlobs` (Blobs are structured-clone-storable), so every read
+  // mints fresh, working URLs from those before handing the dataset back.
+  async function getCachedDataset() {
+    const dataset = await get(DATASET_KEY);
+    if (dataset && dataset.iconBlobs) {
+      const icons = {};
+      for (const name in dataset.iconBlobs) {
+        icons[name] = URL.createObjectURL(dataset.iconBlobs[name]);
+      }
+      dataset.icons = icons;
+    }
+    return dataset;
+  }
+
   return {
     getSavedRoot: () => get(ROOT_KEY),
     saveRoot: (handle) => set(ROOT_KEY, handle),
     clearRoot: () => del(ROOT_KEY),
-    getCachedDataset: () => get(DATASET_KEY),
+    getCachedDataset,
     saveCachedDataset: (obj) => set(DATASET_KEY, obj),
     clearCachedDataset: () => del(DATASET_KEY),
   };

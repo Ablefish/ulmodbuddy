@@ -1188,10 +1188,18 @@ window.ULModBuddyBuilder = (function () {
     return candidates;
   }
 
-  // Resolves an icon to an object URL lazily and caches it -- used_icons
-  // maps a resolved atlas-relative stem to its FileSystemFileHandle so the
-  // same file is never turned into more than one object URL.
-  const objectUrlCache = new Map(); // stem -> url (async-safe: values are promises)
+  // Resolves an icon to its file's raw bytes (a Blob) plus an object URL
+  // for immediate use, and caches both by resolved stem -- used_icons maps
+  // a resolved atlas-relative stem to its FileSystemFileHandle so the same
+  // file is never read/turned into more than one object URL.
+  //
+  // The Blob is what actually gets persisted to IndexedDB (see build()'s
+  // `iconBlobs`, and storage.js's getCachedDataset()) -- a blob: URL is only
+  // valid for the document that created it, so one baked into a cached
+  // dataset and reused after a reload is already dead. Caching the Blob
+  // itself (structured-clone-storable, unlike the URL string) lets a fresh,
+  // valid URL be minted from it on every page load instead.
+  const iconCache = new Map(); // stem -> Promise<{blob, url}>
 
   async function resolveIcon(name, iconIndex, customIcons, usedIcons) {
     if (!name) return null;
@@ -1200,13 +1208,16 @@ window.ULModBuddyBuilder = (function () {
     const handle = iconIndex.get(lookup);
     if (!handle) return null;
     usedIcons.set(lookup, handle);
-    if (!objectUrlCache.has(lookup)) {
-      objectUrlCache.set(
+    if (!iconCache.has(lookup)) {
+      iconCache.set(
         lookup,
-        (async () => URL.createObjectURL(await handle.getFile()))()
+        (async () => {
+          const blob = await handle.getFile();
+          return { blob, url: URL.createObjectURL(blob) };
+        })()
       );
     }
-    return await objectUrlCache.get(lookup);
+    return await iconCache.get(lookup);
   }
 
   async function resolveIconWithVariantFallback(
@@ -1360,6 +1371,7 @@ window.ULModBuddyBuilder = (function () {
     }
 
     const icons = {};
+    const iconBlobs = {};
     const fallbackUsed = [];
     const baseGameUsed = [];
     const extendsUsed = [];
@@ -1368,7 +1380,8 @@ window.ULModBuddyBuilder = (function () {
         nm, iconIndex, customIcons, usedIcons, variantHelperCandidates, baseIconIndex, extendsMap
       );
       if (rel) {
-        icons[nm] = rel;
+        icons[nm] = rel.url;
+        iconBlobs[nm] = rel.blob;
         if (source === "variant" || source === "variant_base_game") fallbackUsed.push(nm);
         else if (source === "base_game") baseGameUsed.push(nm);
         else if (source === "extends") extendsUsed.push(nm);
@@ -1455,6 +1468,7 @@ window.ULModBuddyBuilder = (function () {
       },
       names,
       icons,
+      iconBlobs,
       acquisition,
       harvestSources,
       recycleYields,
