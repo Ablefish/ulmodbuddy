@@ -1,8 +1,16 @@
 name: Deploy GitHub Pages
 
+# Deliberately NOT triggered on every push to master -- master can take
+# in-progress/half-tested commits freely without any of it going live to
+# whoever's already using the hosted app. The live site only updates when
+# a version tag (v1.2.3, matching CHANGELOG.md/`gh release`) gets pushed,
+# so "tag it" IS "release it". To roll back a bad release: either push a
+# new fixed tag (fix-forward), or re-run this workflow manually
+# (workflow_dispatch, below) with an older tag as the ref to redeploy that
+# exact prior version.
 on:
   push:
-    branches: ["master"]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
