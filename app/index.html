@@ -83,9 +83,13 @@
         the local dataset from it, entirely in your browser. Nothing is ever uploaded --
         no server is involved at all, and no mod files are copied anywhere.</p>
       <div id="build-unsupported" class="build-error" hidden>
-        Your browser doesn't support the File System Access API this needs
-        (Chrome, Edge, and other Chromium-based browsers do; Firefox and Safari
-        currently don't). See the README for the alternative local-Python setup.
+        Your browser doesn't support the File System Access API this needs.
+        Chrome and Edge support it out of the box; Firefox and Safari
+        currently don't. <strong>Brave</strong> ships the same engine as
+        Chrome but disables this API by default -- enable it at
+        <code>brave://flags/#file-system-access-api</code> and relaunch, or
+        just use Chrome/Edge. See the README for the alternative local-Python
+        setup.
       </div>
       <button id="build-choose" type="button">Choose your install folder&hellip;</button>
       <div id="build-error" class="build-error" hidden></div>
