@@ -199,7 +199,55 @@ window.ULModBuddyBuilder = (function () {
     };
   }
 
+  function indexOfBytes(haystack, needle) {
+    outer: for (let i = 0; i <= haystack.length - needle.length; i++) {
+      for (let j = 0; j < needle.length; j++) {
+        if (haystack[i + j] !== needle[j]) continue outer;
+      }
+      return i;
+    }
+    return -1;
+  }
+
+  // ModInfo.xml's <Version> is maintained by hand and has been seen lagging
+  // behind real releases (2.7.01 there vs. 2.7.24 the compiled mod itself
+  // reports in-game -- confirmed by JP, 2026-09-14). The real version is
+  // still readable, just not from any XML: UndeadLegacy.dll embeds it as
+  // what looks like a build-tool-generated attribute -- three
+  // length-prefixed strings back to back in the assembly's blob heap,
+  // confirmed byte-for-byte: `[12]"UndeadLegacy"[13]"Undead Legacy"[N]"X.Y.Z"`.
+  // This looks for that exact shape (not the literal "2.7.24", which would
+  // just as easily go stale) and validates the trailing string actually
+  // looks like a version before trusting it -- ModInfo.xml is still the
+  // fallback if a future build lays this out differently.
+  async function readDllEmbeddedVersion(paths) {
+    const handle = await tryGetFile(paths.modRoot, "UndeadLegacy.dll");
+    if (!handle) return null;
+    try {
+      const buf = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+      const name1 = new TextEncoder().encode("UndeadLegacy");
+      const name2 = new TextEncoder().encode("Undead Legacy");
+      const anchor = new Uint8Array(1 + name1.length + 1 + name2.length);
+      anchor[0] = name1.length;
+      anchor.set(name1, 1);
+      anchor[1 + name1.length] = name2.length;
+      anchor.set(name2, 1 + name1.length + 1);
+      const idx = indexOfBytes(buf, anchor);
+      if (idx === -1) return null;
+      const versionLenIdx = idx + anchor.length;
+      const versionLen = buf[versionLenIdx];
+      if (!versionLen || versionLen > 32) return null;
+      const versionBytes = buf.slice(versionLenIdx + 1, versionLenIdx + 1 + versionLen);
+      const version = new TextDecoder("utf-8").decode(versionBytes);
+      return /^\d+(\.\d+){1,3}$/.test(version) ? version : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   async function loadModVersion(paths) {
+    let modName = "UndeadLegacy";
+    let xmlVersion = null;
     const modInfoHandle = await tryGetFile(paths.modRoot, "ModInfo.xml");
     if (modInfoHandle) {
       try {
@@ -208,16 +256,16 @@ window.ULModBuddyBuilder = (function () {
         if (!doc.querySelector("parsererror")) {
           const versionEl = doc.querySelector("Version");
           const nameEl = doc.querySelector("Name");
-          const version = versionEl && versionEl.getAttribute("value");
-          if (version) {
-            const modName = (nameEl && nameEl.getAttribute("value")) || "UndeadLegacy";
-            return `${modName} ${version}`;
-          }
+          xmlVersion = versionEl && versionEl.getAttribute("value");
+          modName = (nameEl && nameEl.getAttribute("value")) || modName;
         }
       } catch (e) {
-        /* fall through to the folder-name-less fallback below */
+        /* fall through */
       }
     }
+    const dllVersion = await readDllEmbeddedVersion(paths);
+    const version = dllVersion || xmlVersion;
+    if (version) return `${modName} ${version}`;
     return "your install"; // no directory handle exposes its own folder name reliably across browsers
   }
 

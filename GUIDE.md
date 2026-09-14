@@ -4,6 +4,10 @@ This walks through what the app actually does once it's built its dataset
 from your install. For getting it running in the first place, see the
 [README](README.md).
 
+This guide (and the app itself) assumes a desktop browser -- it hasn't
+been tested on phones or tablets, and setup in particular relies on a
+browser API mobile browsers largely don't support yet.
+
 ## Searching and filtering
 
 Type in the search box to find any recipe, research topic, or workstation

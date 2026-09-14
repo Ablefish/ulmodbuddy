@@ -4,6 +4,11 @@
 account, nothing to download. New here? See the **[User Guide](GUIDE.md)**
 for a walkthrough of what it can do, with screenshots.
 
+**Desktop only, for now.** This hasn't been tested on a phone or tablet,
+and the zero-install setup flow depends on the File System Access API,
+which mobile browsers largely don't support at all -- picking your
+install folder likely won't work there yet.
+
 A browsable recipe/research/workstation reference for the [Undead Legacy](http://ul.subquake.com)
 mod for *7 Days to Die*. Search for any craftable item, research topic, or
 workstation, and see its full "Total Requirements Report" -- a cascading,
