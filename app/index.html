@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>UL Mod Buddy</title>
-<link rel="stylesheet" href="styles.css?dev=23">
+<link rel="stylesheet" href="styles.css?dev=24">
 </head>
 <body>
 <header>
@@ -91,7 +91,10 @@
         just use Chrome/Edge. See the README for the alternative local-Python
         setup.
       </div>
-      <button id="build-choose" type="button">Choose your install folder&hellip;</button>
+      <div id="build-choose-row" class="build-choose-row">
+        <button id="build-choose" type="button">Choose your install folder&hellip;</button>
+        <button id="build-choose-new" type="button" hidden>Choose a different folder&hellip;</button>
+      </div>
       <div id="build-error" class="build-error" hidden></div>
       <div id="build-status" class="build-status"></div>
       <pre id="build-log" class="build-log"></pre>
@@ -106,7 +109,7 @@
 <script src="reportEngine.js?dev=5"></script>
 <script src="build.js?dev=3"></script>
 <script src="storage.js?dev=2"></script>
-<script src="setup.js?dev=3"></script>
+<script src="setup.js?dev=4"></script>
 <script src="app.js?dev=48"></script>
 </body>
 </html>

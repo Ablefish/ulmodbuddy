@@ -9,11 +9,13 @@
 // dataset exists, and exposes window.ULModBuddySetup.open({allowCancel}) so
 // app.js's "Rebuild data" button can reopen it later.
 //
-// One picked folder handle is reused across visits: "Choose your install
-// folder" first tries any previously-saved handle (re-confirming permission,
-// which needs a user gesture -- this button click provides it) before ever
-// falling back to a fresh directory picker, so a returning visitor only
-// re-picks if permission was actually revoked.
+// One picked folder handle is reused across visits. Once a folder's been
+// picked once, the modal offers two explicit choices rather than silently
+// guessing which one you want: "Rebuild from current folder" (re-confirms
+// permission on the saved handle -- needs a user gesture, which this button
+// click provides) or "Choose a different folder..." (always opens a fresh
+// picker, e.g. switching between a live install and a test/clone one).
+// First-run setup has no saved folder yet, so it's just the one button.
 //
 // window.ULModBuddyApp.init(data) is called EXACTLY ONCE per real page load
 // -- a first-run build calls it directly (nothing has initialized yet this
@@ -27,6 +29,7 @@
   const modalEl = $("#build-modal");
   const cancelEl = $("#build-cancel");
   const chooseEl = $("#build-choose");
+  const chooseNewEl = $("#build-choose-new");
   const unsupportedEl = $("#build-unsupported");
   const errorEl = $("#build-error");
   const statusEl = $("#build-status");
@@ -37,10 +40,19 @@
   const supported = typeof window.showDirectoryPicker === "function";
 
   let allowCancel = false;
+  // Whether a saved root exists is what decides the modal's button layout
+  // (see open() below) -- re-checked every time the modal opens, since
+  // "Rebuild data" can run long after the initial pick.
+  let hasSavedRoot = false;
 
   function setBuilding(isBuilding) {
     chooseEl.disabled = isBuilding || !supported;
-    chooseEl.textContent = isBuilding ? "Building…" : "Choose your install folder…";
+    chooseNewEl.disabled = isBuilding || !supported;
+    chooseEl.textContent = isBuilding
+      ? "Building…"
+      : hasSavedRoot
+      ? "Rebuild from current folder"
+      : "Choose your install folder…";
   }
 
   function showError(msg) {
@@ -58,7 +70,7 @@
     logEl.scrollTop = logEl.scrollHeight;
   }
 
-  function open(opts) {
+  async function open(opts) {
     opts = opts || {};
     allowCancel = !!opts.allowCancel;
     cancelEl.hidden = !allowCancel;
@@ -66,6 +78,12 @@
     statusEl.textContent = "";
     logEl.textContent = "";
     unsupportedEl.hidden = supported;
+    const saved = await storage.getSavedRoot().catch(() => null);
+    hasSavedRoot = !!saved;
+    // Only worth offering a choice once there's a *current* folder to
+    // rebuild from -- first-run setup has nothing to contrast "a different
+    // folder" against, so it stays a single button there.
+    chooseNewEl.hidden = !hasSavedRoot;
     setBuilding(false);
     modalEl.hidden = false;
   }
@@ -83,28 +101,39 @@
     if (e.key === "Escape" && !modalEl.hidden) close();
   });
 
-  // Reuses a previously-granted folder handle when possible -- queryPermission
+  // Re-confirms permission on the already-saved root -- queryPermission
   // never prompts, requestPermission does but only needs a user gesture,
-  // which this button click already provides. Falls back to a fresh picker
-  // whenever there's no saved handle, or permission for it was revoked.
-  async function getDirectoryHandle() {
+  // which this button click provides. No picker fallback here: "rebuild
+  // from the current folder" should mean exactly that; pickNewHandle()
+  // below is the explicit "no, a different folder" path. Returns null if
+  // permission isn't granted, so the caller can surface that rather than
+  // silently doing nothing.
+  async function getSavedHandle() {
     const saved = await storage.getSavedRoot().catch(() => null);
-    if (saved) {
-      const already = await saved.queryPermission({ mode: "read" }).catch(() => "prompt");
-      if (already === "granted") return saved;
-      const granted = await saved.requestPermission({ mode: "read" }).catch(() => "denied");
-      if (granted === "granted") return saved;
-    }
+    if (!saved) return null;
+    const already = await saved.queryPermission({ mode: "read" }).catch(() => "prompt");
+    if (already === "granted") return saved;
+    const granted = await saved.requestPermission({ mode: "read" }).catch(() => "denied");
+    return granted === "granted" ? saved : null;
+  }
+
+  async function pickNewHandle() {
     return await window.showDirectoryPicker();
   }
 
-  chooseEl.addEventListener("click", async () => {
+  async function runBuild(getHandle) {
     clearError();
     setBuilding(true);
     statusEl.textContent = "Waiting for folder access…";
     logEl.textContent = "";
     try {
-      const handle = await getDirectoryHandle();
+      const handle = await getHandle();
+      if (!handle) {
+        setBuilding(false);
+        statusEl.textContent = "";
+        showError("Couldn't reuse the saved folder (permission wasn't granted) -- try “Choose a different folder…” instead.");
+        return;
+      }
       statusEl.textContent = "Building…";
       const dataset = await builder.build(handle, appendLog);
       await storage.saveRoot(handle);
@@ -134,6 +163,18 @@
         showError("Build failed: " + (err && err.message ? err.message : err));
       }
     }
+  }
+
+  // Primary button: reuse the saved folder once one exists; first-run
+  // setup has none yet, so it's just a picker there too.
+  chooseEl.addEventListener("click", () => {
+    runBuild(hasSavedRoot ? getSavedHandle : pickNewHandle);
+  });
+
+  // Secondary button, shown only once a saved folder exists: always opens
+  // a fresh picker, ignoring whatever's currently saved.
+  chooseNewEl.addEventListener("click", () => {
+    runBuild(pickNewHandle);
   });
 
   async function main() {

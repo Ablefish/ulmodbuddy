@@ -929,6 +929,11 @@ img.icon-ring-workstation {
   color: var(--text);
 }
 
+.build-choose-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 #build-choose {
   background: var(--accent-dim);
   border: 1px solid var(--accent);
@@ -939,6 +944,19 @@ img.icon-ring-workstation {
   font-size: 13px;
 }
 #build-choose:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+#build-choose-new {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 8px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+#build-choose-new:disabled {
   opacity: 0.6;
   cursor: default;
 }
