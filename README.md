@@ -1,7 +1,8 @@
 # UL Mod Buddy
 
 **[Open the app](https://ablefish.github.io/ulmodbuddy/)** -- no install, no
-account, nothing to download.
+account, nothing to download. New here? See the **[User Guide](GUIDE.md)**
+for a walkthrough of what it can do, with screenshots.
 
 A browsable recipe/research/workstation reference for the [Undead Legacy](http://ul.subquake.com)
 mod for *7 Days to Die*. Search for any craftable item, research topic, or
@@ -78,3 +79,4 @@ your updated install.
   typos, missing localization) is visible in-app via the "N build
   warning(s)" link in the header, not just in a terminal.
 - The tool never modifies your game install -- it only reads from it.
+- See [CHANGELOG.md](CHANGELOG.md) for release history.
