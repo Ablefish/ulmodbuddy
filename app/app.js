@@ -3,16 +3,18 @@
 // real Phase-1 feature. See reportEngine.js for the pure recursion logic;
 // this file is just data plumbing + rendering + DOM wiring.
 
-(function () {
+// Exposes window.ULModBuddyApp.init(data) rather than self-running against a
+// window.ULMODBUDDY_DATA global set by a generated <script> tag -- now that
+// the dataset can come from an async IndexedDB read or a live in-browser
+// build (see setup.js), nothing here can assume data is available the
+// instant this file is parsed. setup.js calls init() exactly once per real
+// page load (a fresh build always ends in a reload rather than a second,
+// same-page init() call, so none of the event listeners below are ever
+// double-registered).
+window.ULModBuddyApp = (function () {
   "use strict";
 
-  const data = window.ULMODBUDDY_DATA;
-  if (!data) {
-    // setup.js (loaded just before this file) already opened the build
-    // modal in no-cancel mode when it saw window.ULMODBUDDY_DATA was unset --
-    // nothing else to do here until that finishes.
-    return;
-  }
+  function init(data) {
   if (!window.ULModBuddyReportEngine) {
     document.getElementById("detail").textContent =
       "reportEngine.js did not load -- is it included in index.html alongside app.js?";
@@ -1608,4 +1610,7 @@
   });
 
   renderResults();
+  }
+
+  return { init: init };
 })();

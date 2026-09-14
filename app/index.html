@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>UL Mod Buddy</title>
-<link rel="stylesheet" href="styles.css?dev=22">
+<link rel="stylesheet" href="styles.css?dev=23">
 </head>
 <body>
 <header>
@@ -78,14 +78,16 @@
       <button id="build-cancel" class="modal-close" type="button" title="Cancel" aria-label="Cancel" hidden>&times;</button>
     </div>
     <div class="modal-body">
-      <p class="build-intro">Point this at your 7 Days To Die install folder (the one
+      <p class="build-intro">Grant access to your 7 Days To Die install folder (the one
         containing <code>Mods\UndeadLegacy</code> and <code>Data</code>) to (re)build
-        the local dataset from it. Nothing is ever uploaded -- everything happens on
-        your own machine.</p>
-      <form id="build-form">
-        <input id="build-path-input" type="text" placeholder="C:\7D2D\Custom\Undead_22" autocomplete="off" spellcheck="false">
-        <button id="build-submit" type="submit">Build</button>
-      </form>
+        the local dataset from it, entirely in your browser. Nothing is ever uploaded --
+        no server is involved at all, and no mod files are copied anywhere.</p>
+      <div id="build-unsupported" class="build-error" hidden>
+        Your browser doesn't support the File System Access API this needs
+        (Chrome, Edge, and other Chromium-based browsers do; Firefox and Safari
+        currently don't). See the README for the alternative local-Python setup.
+      </div>
+      <button id="build-choose" type="button">Choose your install folder&hellip;</button>
       <div id="build-error" class="build-error" hidden></div>
       <div id="build-status" class="build-status"></div>
       <pre id="build-log" class="build-log"></pre>
@@ -97,9 +99,10 @@
      testing only (the app's own script tags don't otherwise change); bump N
      whenever a stale browser cache serves an old copy of one of these
      mid-session. Harmless to ship, but fine to drop before a real release. -->
-<script src="data.js?dev=14"></script>
 <script src="reportEngine.js?dev=5"></script>
-<script src="setup.js?dev=2"></script>
-<script src="app.js?dev=47"></script>
+<script src="build.js?dev=2"></script>
+<script src="storage.js?dev=1"></script>
+<script src="setup.js?dev=3"></script>
+<script src="app.js?dev=48"></script>
 </body>
 </html>

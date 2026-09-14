@@ -929,28 +929,16 @@ img.icon-ring-workstation {
   color: var(--text);
 }
 
-#build-form {
-  display: flex;
-  gap: 8px;
-}
-#build-path-input {
-  flex: 1;
-  background: var(--panel-alt);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 8px 10px;
-  border-radius: 4px;
-  font-size: 13px;
-}
-#build-submit {
+#build-choose {
   background: var(--accent-dim);
   border: 1px solid var(--accent);
   color: var(--text);
   padding: 8px 14px;
   border-radius: 4px;
   cursor: pointer;
+  font-size: 13px;
 }
-#build-submit:disabled {
+#build-choose:disabled {
   opacity: 0.6;
   cursor: default;
 }
@@ -959,6 +947,7 @@ img.icon-ring-workstation {
   color: var(--unknown);
   font-size: 13px;
   margin-top: 10px;
+  white-space: pre-line;
 }
 .build-status {
   color: var(--text-dim);
