@@ -13,21 +13,40 @@ Pimps, Subquake, or the Undead Legacy team.
 ## No mod content is bundled
 
 This repository contains only the tool itself. **No game files, mod files,
-or extracted images are included or ever committed.** On first run, the app
-asks you to point it at your own, legally-owned *7 Days to Die* install
-(with Undead Legacy installed as a mod) and builds a local dataset directly
-from those files. Nothing is uploaded anywhere -- the build happens
-entirely on your own machine, and the generated data never leaves it unless
-you choose to share it yourself.
+or extracted images are included or ever committed.** The app asks you to
+grant it access to your own, legally-owned *7 Days to Die* install (with
+Undead Legacy installed as a mod) and builds a dataset directly from those
+files, entirely in your browser. Nothing is ever uploaded anywhere -- there
+is no server involved at all, and no mod files or icons are copied out of
+your install folder; they're referenced directly from it.
 
-## Requirements
+## Setup (zero install -- Chrome, Edge, or another Chromium-based browser)
 
-- Python 3 (no extra packages -- everything here is standard library only)
-- Your own copy of *7 Days to Die* with the Undead Legacy mod installed,
-  e.g. `C:\7D2D\Custom\Undead_22` (the folder should contain both
-  `Mods\UndeadLegacy` and `Data`)
+1. Download or clone this repository, then open `app/index.html` in your
+   browser -- or, if this has been published as a static site (e.g. GitHub
+   Pages), just open that page. Either way, no server or Python is needed.
+2. Click **Choose your install folder...** and pick your *7 Days to Die*
+   install, e.g. `C:\7D2D\Custom\Undead_22` (the folder should contain both
+   `Mods\UndeadLegacy` and `Data`). Your browser will ask you to confirm
+   read access to it.
+3. The app reads your local install and builds the dataset right there in
+   the page; it takes a few seconds. That's it -- the app takes over once
+   the build finishes.
 
-## Setup
+Your picked folder and the built dataset are both remembered (via your
+browser's local storage) for next time, so a returning visit loads
+instantly without repeating this. If Undead Legacy updates later, click
+**Rebuild data** in the header to regenerate against your updated install.
+
+This flow relies on the File System Access API, which Chrome, Edge, and
+other Chromium-based browsers support but Firefox and Safari currently do
+not. If you're on one of those, use the Python fallback below instead.
+
+## Setup (fallback -- Firefox, Safari, or if you just prefer local Python)
+
+Requirements: Python 3 (no extra packages -- everything here is standard
+library only), and the same *7 Days to Die* + Undead Legacy install
+described above.
 
 1. Download or clone this repository.
 2. Run the local server:
