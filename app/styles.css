@@ -810,13 +810,19 @@ img.icon-ring-workstation {
   max-height: 65vh;
 }
 
+/* Rendered at 2x scale internally (see renderResearchTreeSvg's ZOOM) but
+   displayed fit-to-width rather than at native pixel size -- an initial
+   "zoomed out" overview of the whole tree, with room to still read chunkier
+   icons/text than a plain 1x render fit to the same width would give. */
 .tree-svg {
   display: block;
+  width: 100%;
+  height: auto;
 }
 
 .tree-edge {
   stroke: var(--border);
-  stroke-width: 2;
+  stroke-width: 4;
 }
 
 .tree-node {
@@ -826,7 +832,7 @@ img.icon-ring-workstation {
 .tree-node circle {
   fill: var(--panel-alt);
   stroke: var(--direct);
-  stroke-width: 2;
+  stroke-width: 4;
 }
 
 /* Not --accent -- that's also Tier 2's ring color (see .tree-node-tier-2),
@@ -834,11 +840,11 @@ img.icon-ring-workstation {
    distinct from every tier/unlocked color the ring could already be. */
 .tree-node:hover circle {
   stroke: var(--text);
-  stroke-width: 3;
+  stroke-width: 6;
 }
 
 .tree-node-large circle {
-  stroke-width: 3;
+  stroke-width: 6;
 }
 
 .tree-node-tier-1 circle { stroke: var(--direct); }
@@ -853,7 +859,7 @@ img.icon-ring-workstation {
 
 .tree-node text {
   fill: var(--text-dim);
-  font-size: 11px;
+  font-size: 22px;
 }
 
 .tree-node:hover text {

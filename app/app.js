@@ -507,8 +507,18 @@ window.ULModBuddyApp = (function () {
     const nodes = researchTreeGroups.get(root) || [];
     if (!nodes.length) return `<div class="req-flag-dim">No nodes in this category.</div>`;
 
+    // SCALE (grid-unit-to-pixel spacing, from the game's own `pos` deltas)
+    // stays untouched -- per JP's 2026-09-14 call, not worth re-fighting
+    // that math a second time. Since a node only ever shows an icon and a
+    // name, ZOOM instead just makes each node's own rendered elements
+    // (circle/icon/text) bigger relative to that fixed grid spacing, so
+    // there's less dead space between them -- the SVG is then displayed
+    // fit-to-width (see .tree-svg's CSS) rather than at native pixel size,
+    // so bigger elements mean a chunkier zoomed-out overview, not more
+    // scrolling.
+    const ZOOM = 2;
     const SCALE = 70;
-    const PAD = 50;
+    const PAD = 50 * ZOOM;
     const absPos = computeAbsolutePositions(nodes);
     const xs = [...absPos.values()].map((p) => p.x);
     const ys = [...absPos.values()].map((p) => p.y);
@@ -546,7 +556,7 @@ window.ULModBuddyApp = (function () {
     let nodesHtml = "";
     for (const n of nodes) {
       const p = posOf(n.name);
-      const r = n.size === "large" ? 26 : 18;
+      const r = (n.size === "large" ? 26 : 18) * ZOOM;
       const icon = iconForResearch(n.name);
       const cls =
         "tree-node" +
@@ -556,7 +566,7 @@ window.ULModBuddyApp = (function () {
       nodesHtml += `<g class="${cls}" data-name="${n.name}" transform="translate(${p.x},${p.y})">`;
       nodesHtml += `<circle r="${r}"/>`;
       if (icon) nodesHtml += `<image href="${icon}" x="${-r * 0.7}" y="${-r * 0.7}" width="${r * 1.4}" height="${r * 1.4}"/>`;
-      nodesHtml += `<text y="${r + 14}" text-anchor="middle">${displayName(n.name)}</text>`;
+      nodesHtml += `<text y="${r + 14 * ZOOM}" text-anchor="middle">${displayName(n.name)}</text>`;
       nodesHtml += `</g>`;
     }
 

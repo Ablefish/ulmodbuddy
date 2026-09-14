@@ -20,8 +20,10 @@
 // window.ULModBuddyApp.init(data) is called EXACTLY ONCE per real page load
 // -- a first-run build calls it directly (nothing has initialized yet this
 // load), while a "Rebuild data" success always reloads instead, so app.js's
-// event listeners are never registered twice. Loaded before app.js -- see
-// index.html's script order.
+// event listeners are never registered twice. Loaded AFTER app.js -- see
+// index.html's script order -- so window.ULModBuddyApp already exists by
+// the time main() (below) might synchronously resolve a cached dataset and
+// call .init() on it.
 (function () {
   "use strict";
 
