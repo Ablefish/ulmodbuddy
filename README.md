@@ -1,13 +1,11 @@
 # UL Mod Buddy
 
-**[Open the app](https://ablefish.github.io/ulmodbuddy/)** -- no install, no
-account, nothing to download. New here? See the **[User Guide](GUIDE.md)**
-for a walkthrough of what it can do, with screenshots.
+New here? See the **[User Guide](GUIDE.md)** for a walkthrough of what it
+can do, with screenshots.
 
-**Desktop only, for now.** This hasn't been tested on a phone or tablet,
-and the zero-install setup flow depends on the File System Access API,
-which mobile browsers largely don't support at all -- picking your
-install folder likely won't work there yet.
+Only tested on desktop, with Chrome or Edge. A local Python fallback is
+available if you have Python installed and want to use a different
+browser -- see below.
 
 A browsable recipe/research/workstation reference for the [Undead Legacy](http://ul.subquake.com)
 mod for *7 Days to Die*. Search for any craftable item, research topic, or
@@ -48,8 +46,9 @@ your install folder; they're referenced directly from it.
 
 Your picked folder and the built dataset are both remembered (via your
 browser's local storage) for next time, so a returning visit loads
-instantly without repeating this. If Undead Legacy updates later, click
-**Rebuild data** in the header to regenerate against your updated install.
+instantly without repeating this. If you update the mod yourself later,
+click **Rebuild data** in the header to regenerate against your updated
+install.
 
 This flow relies on the File System Access API. Chrome and Edge support it
 out of the box; Firefox and Safari currently don't. **Brave** ships the same
@@ -74,9 +73,9 @@ described above.
    path and click **Build**. This reads your local install and generates
    `app/data.js` plus the icons the app needs; it takes a few seconds.
 
-That's it -- the app takes over once the build finishes. If Undead Legacy
-updates later, click **Rebuild data** in the header to regenerate against
-your updated install.
+That's it -- the app takes over once the build finishes. If you update
+the mod yourself later, click **Rebuild data** in the header to
+regenerate against your updated install.
 
 ## Notes
 

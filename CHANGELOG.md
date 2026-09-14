@@ -3,6 +3,33 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.0.3] - 2026-09-14
+
+### Changed
+
+- **GUIDE.md and README.md wording pass.** "Reading an item's page: the
+  crafting cost tree" is now just "Item Detail Page," and the outdated
+  "Total Requirements Report" phrasing is gone. "Recycles Into" and its
+  surrounding text no longer say "scrap" -- that's a different in-game
+  mechanic (breaking items down in your inventory) from what this section
+  actually covers (the Recycler). "Rebuild data" is now described as
+  something you do after updating the mod yourself, not something the
+  app implies happens automatically -- modding is always a manual,
+  user-driven update process.
+- **Dropped the prominent "Open the app" link/callout from the top of
+  README.md.** It invited mobile or incompatible-browser visitors to
+  click through before reading any of the compatibility caveats below
+  it. The link still exists as step 1 of the Setup section, in context.
+  The standalone disclaimer paragraph was also trimmed to one concise
+  line (desktop, Chrome/Edge, Python fallback for other browsers).
+
+### Added
+
+- Two new close-up screenshots in GUIDE.md: the full row of acquisition
+  chips (Recycle/Quest/Harvest/Craft/Loot/Buy) next to where they're
+  first explained, and a Harvest+Recycle-only close-up at the top of the
+  "Where to find things" section.
+
 ## [1.0.2] - 2026-09-14
 
 ### Changed

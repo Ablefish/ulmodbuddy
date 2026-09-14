@@ -23,10 +23,10 @@ recipe page is "what does it cost to build this," the research page is
 "what does it cost to unlock the ability to build this." Click whichever
 one you actually want.
 
-## Reading an item's page: the crafting cost tree
+## Item Detail Page
 
-Selecting an item opens its **Total Requirements Report** -- everything
-needed to make it, all the way down to raw materials, in one place.
+Selecting an item opens its detail page -- everything needed to make it,
+all the way down to raw materials, in one place.
 
 ![Iron Knife's detail page: crafting cost tree, research required, workstations, and what it recycles into](docs/screenshots/item-detail-page.png)
 
@@ -38,6 +38,9 @@ A few things worth knowing about this page:
 - **The chips next to every ingredient** (Craft / Loot / Buy / Harvest /
   Recycle / Quest) show every way that item can be obtained. Craft always
   means "look up its own recipe" -- the other chips are described below.
+
+  ![Close-up of an ingredient row's chips: Recycle, Quest, Harvest, Craft, Loot, Buy](docs/screenshots/chips-all-types.png)
+
 - **The ▶ triangle** next to any craftable ingredient, workstation, or
   research step expands it into its *own* cost tree. Left collapsed, an
   ingredient is assumed to already be in hand (bought, looted, harvested,
@@ -50,8 +53,8 @@ A few things worth knowing about this page:
 
   ![7.92mm Round (HP)'s research section, showing one research step cascading from an earlier one, and its own recycle yield](docs/screenshots/item-detail-research-cascade.png)
 
-- **Recycles Into**, at the bottom, shows what you get back if you scrap
-  a copy of the item instead of using it.
+- **Recycles Into**, at the bottom, shows what you get back for breaking
+  a copy of the item down at a Recycler.
 
 ### One-time totals
 
@@ -67,10 +70,12 @@ ingredient appearing under three different sub-trees by hand.
 Two of the chips shown next to an ingredient open a popup instead of
 jumping to another page:
 
+![Close-up of the Harvest and Recycle chips](docs/screenshots/chips-harvest-recycle.png)
+
 - **Harvest** -- every block/entity in the world that drops this item,
   with expected drop counts.
-- **Recycle** -- every other item you could scrap to get this one back
-  as a yield.
+- **Recycle** -- every other item you could break down at a Recycler to
+  get this one back as a yield.
 
 Both are grouped into **High / Medium / Low yield** tiers, relative to
 the best source for that specific item -- so the top of the list is
@@ -78,7 +83,7 @@ always where you should actually go looking first.
 
 ![Harvest Sources popup for Iron Plating, grouped into High/Medium/Low yield tiers](docs/screenshots/harvest-sources.png)
 
-![Recycle Sources popup for Iron Plating, showing which items to scrap and their yield tiers](docs/screenshots/recycle-sources.png)
+![Recycle Sources popup for Iron Plating, showing which items to break down and their yield tiers](docs/screenshots/recycle-sources.png)
 
 ## The Research Tree
 
@@ -119,8 +124,9 @@ Click the column headers to re-sort by a different stat.
 
 ## Keeping the data current
 
-If Undead Legacy updates and you want the app to reflect the new
-version, click **Rebuild data** in the header. You get two choices:
+If you've updated the mod, or reinstalled it to a new location, click
+**Rebuild data** in the header to have the app pick that up. You get two
+choices:
 
 ![Rebuild data modal offering "Rebuild from current folder" or "Choose a different folder..."](docs/screenshots/rebuild-data-modal.png)
 
