@@ -53,6 +53,11 @@ A few things worth knowing about this page:
 
   ![7.92mm Round (HP)'s research section, showing one research step cascading from an earlier one, and its own recycle yield](docs/screenshots/item-detail-research-cascade.png)
 
+- **Opens Into**, shown for the handful of items with an "Open" action of
+  their own (an ammo box, a quest-reward bundle) -- what you get for using
+  it. Some bundles also roll a random pick from a pool on top of their
+  fixed contents; that part is clearly marked as inferred from the mod's
+  own data, not confirmed by play-testing.
 - **Scraps Into**, followed by **Recycles Into**, cover the two separate
   ways to break an item back down: Scraps Into is the in-inventory "Scrap"
   action (always one fixed resource, no Recycler needed); Recycles Into is
@@ -70,7 +75,8 @@ ingredient appearing under three different sub-trees by hand.
 ## Where to find things: Harvest and Recycle sources
 
 Two of the chips shown next to an ingredient open a popup instead of
-jumping to another page:
+jumping to another page -- shown filled in solidly (rather than outlined,
+like the other four) so they read as clickable at a glance:
 
 ![Close-up of the Harvest and Recycle chips](docs/screenshots/chips-harvest-recycle.png)
 

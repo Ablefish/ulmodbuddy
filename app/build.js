@@ -609,7 +609,17 @@ window.ULModBuddyBuilder = (function () {
         const rid = attr(el, "id");
         if (!rid) continue;
         if (attr(el, "type") === "Item") rewardable.add(rid);
-        else if (attr(el, "type") === "LootItem") flattenGroup(rid, lootGroups, visited, rewardable);
+        else if (attr(el, "type") === "LootItem") {
+          // A LootItem reward's id is routinely a COMMA LIST of alternate
+          // group choices (e.g. "groupSchematics,groupBooks" -- 272 of
+          // these in the current install), not always the single group
+          // name type="Item" rewards use -- flattening the whole comma
+          // string as one group name would silently match nothing, since
+          // no group is ever actually named that.
+          for (const groupName of rid.split(",").map((s) => s.trim()).filter(Boolean)) {
+            flattenGroup(groupName, lootGroups, visited, rewardable);
+          }
+        }
       }
     }
 
@@ -619,9 +629,28 @@ window.ULModBuddyBuilder = (function () {
   // -------------------------------------------------------------------
   // Shared source-row helpers (harvest + recycle)
   // -------------------------------------------------------------------
-  function parseCountRange(countAttr) {
+  // Never lets one bad numeric value produce a silent NaN downstream --
+  // warns and falls back instead. `context` identifies where the value
+  // came from (e.g. "blocks.xml <drop name='X'> prob"), so a future bad
+  // value is traceable rather than just showing up as "NaNx" in the app.
+  function safeFloat(value, fallback, context) {
+    const n = parseFloat(value);
+    if (Number.isFinite(n)) return n;
+    if (context) warn(`${context}: expected a number, got ${JSON.stringify(value)} -- using ${fallback}`);
+    return fallback;
+  }
+
+  // "3,5" -> [3, 5]; "1" -> [1, 1]. Every count attribute seen in the
+  // source is either a bare integer or a comma-separated min,max pair --
+  // never a dash range -- so this is deliberately not more permissive.
+  // Falls back to [1, 1] rather than propagating a NaN if a future value
+  // doesn't fit either shape (see build/tools/xml_value_shapes.py to
+  // re-check that assumption against a new mod version).
+  function parseCountRange(countAttr, context) {
     const parts = countAttr.split(",");
-    return [Math.trunc(parseFloat(parts[0])), Math.trunc(parseFloat(parts[parts.length - 1]))];
+    const lo = safeFloat(parts[0], 1, context);
+    const hi = safeFloat(parts[parts.length - 1], lo, context);
+    return [Math.trunc(lo), Math.trunc(hi)];
   }
 
   function expectedYield(s) {
@@ -737,13 +766,14 @@ window.ULModBuddyBuilder = (function () {
             const countAttr = attr(el, "count", "1");
             if (!name || countAttr === "0") continue;
             harvestable.add(name);
-            const [countMin, countMax] = parseCountRange(countAttr);
+            const ctx = `${fileRef.label} <drop name="${name}">`;
+            const [countMin, countMax] = parseCountRange(countAttr, `${ctx} count`);
             (harvestSources[name] = harvestSources[name] || []).push({
               block: blockName,
               event: attr(el, "event", "Harvest"),
               countMin,
               countMax,
-              prob: parseFloat(attr(el, "prob", "1")),
+              prob: safeFloat(attr(el, "prob", "1"), 1, `${ctx} prob`),
             });
           }
         }
@@ -781,8 +811,9 @@ window.ULModBuddyBuilder = (function () {
           );
           [countAttr, probAttr] = [probAttr, "1"];
         }
-        const [countMin, countMax] = parseCountRange(countAttr || "1");
-        outputs.push({ name: outName, countMin, countMax, prob: parseFloat(probAttr) });
+        const ctx = `${paths.recycleFile.label} <output name="${outName}">`;
+        const [countMin, countMax] = parseCountRange(countAttr || "1", `${ctx} count`);
+        outputs.push({ name: outName, countMin, countMax, prob: safeFloat(probAttr, 1, `${ctx} prob`) });
       }
       if (!inputNames.length || !outputs.length) continue;
       for (const inputName of inputNames) {
@@ -807,11 +838,12 @@ window.ULModBuddyBuilder = (function () {
   // -------------------------------------------------------------------
   // Scrapping (in-inventory "Scrap" action) -- a direct port of build.py's
   // load_scrap_data(); see its comment for the full empirically-derived
-  // writeup of how this differs from the Recycler above (Material/Weight
-  // driven, not its own table). Deliberately restricted to plain <item>/
-  // <block> elements only (unlike this file's icon/Extends resolution,
-  // which also reads <set>/<append> xpath patches) so both build paths
-  // resolve the exact same set of scrappable names from the same install.
+  // writeup of how this differs from the Recycler above (ScrapMaterial-or-
+  // Material/Weight driven, not its own table). Deliberately restricted to
+  // plain <item>/<block> elements only (unlike this file's icon/Extends
+  // resolution, which also reads <set>/<append> xpath patches) so both
+  // build paths resolve the exact same set of scrappable names from the
+  // same install.
   // -------------------------------------------------------------------
   async function loadMaterialForgeCategories(paths) {
     const forgeCategories = {};
@@ -832,32 +864,47 @@ window.ULModBuddyBuilder = (function () {
     return forgeCategories;
   }
 
+  // Must scan every item/set/append/block element (like loadCustomIcons/
+  // loadExtendsGraph do), not just literal <item>/<block> definitions:
+  // ~90 skill books define ScrapMaterial/Weight only via an <append> onto
+  // an item whose own <item> block never carries Material/Weight at all,
+  // so stopping at literal blocks would leave every one of them "not
+  // scrappable". Properties are merged per resolved name across every
+  // matching element (base game first, mod overriding/adding), not just
+  // taken from whichever one happens to carry Weight -- ScrapMaterial and
+  // Weight are routinely set in separate <append>s for the same item.
   async function loadMaterialWeightProps(paths) {
-    const props = {};
+    const raw = {}; // name -> {material, scrapMaterial, weight}
     const allIds = new Set();
-    const files = [
-      { fileRef: paths.baseItemFile, tag: "item" },
-      { fileRef: paths.baseBlockFile, tag: "block" },
-      ...paths.itemFiles.map((fileRef) => ({ fileRef, tag: "item" })),
-      ...paths.blockFiles.map((fileRef) => ({ fileRef, tag: "block" })),
-    ];
-    for (const { fileRef, tag } of files) {
+    const files = [paths.baseItemFile, paths.baseBlockFile].concat(paths.itemFiles, paths.blockFiles);
+    for (const fileRef of files) {
       if (!fileRef.handle) continue;
       const doc = await readAndParse(fileRef);
       if (!doc) continue;
-      for (const el of scanBlocks(doc, tag)) {
-        const name = attr(el, "name");
-        if (!name) continue;
-        allIds.add(name);
-        let material = null;
-        let weight = null;
-        for (const prop of directChildren(el, "property")) {
-          const pname = attr(prop, "name");
-          if (pname === "Material") material = attr(prop, "value");
-          else if (pname === "Weight") weight = attr(prop, "value");
+      for (const tag of ITEM_BLOCK_TAGS) {
+        for (const el of scanBlocks(doc, tag)) {
+          const name = attr(el, "name") || nameFromXpath(attr(el, "xpath"));
+          if (!name) continue;
+          allIds.add(name);
+          const entry = raw[name] || (raw[name] = {});
+          const material = firstPropertyValue(el, "Material");
+          const scrapMaterial = firstPropertyValue(el, "ScrapMaterial");
+          const weight = firstPropertyValue(el, "Weight");
+          if (material !== null) entry.material = material;
+          if (scrapMaterial !== null) entry.scrapMaterial = scrapMaterial;
+          if (weight !== null) entry.weight = weight;
         }
-        if (material && weight) props[name] = [material, weight];
       }
+    }
+    // ScrapMaterial (when present) overrides Material for scrap-target
+    // resolution specifically -- see build.py's load_material_weight_props
+    // for why (a research-resource item's own Material points right back
+    // at itself; ScrapMaterial is the mod's own escape hatch for exactly
+    // that case).
+    const props = {};
+    for (const [name, entry] of Object.entries(raw)) {
+      const effectiveMaterial = entry.scrapMaterial || entry.material;
+      if (effectiveMaterial && entry.weight) props[name] = [effectiveMaterial, entry.weight];
     }
     return { props, allIds };
   }
@@ -881,7 +928,11 @@ window.ULModBuddyBuilder = (function () {
     if (!forgeCategory) return null;
     if (allIds.has(forgeCategory)) return forgeCategory;
     const cap = forgeCategory[0].toUpperCase() + forgeCategory.slice(1);
-    for (const candidate of [`resourceScrap${cap}`, `ulmResourceScrap${cap}`, `unit_${forgeCategory}`]) {
+    // ulmResource<Cap> last: the one confirmed case (forge_category
+    // "research" -> item "ulmResourceResearch") doesn't follow the
+    // resourceScrap<Cap>/ulmResourceScrap<Cap> naming the other bare-word
+    // categories do, so it's tried only after those miss.
+    for (const candidate of [`resourceScrap${cap}`, `ulmResourceScrap${cap}`, `unit_${forgeCategory}`, `ulmResource${cap}`]) {
       if (allIds.has(candidate)) return candidate;
     }
     return null;
@@ -901,6 +952,142 @@ window.ULModBuddyBuilder = (function () {
       scrapYields[nm] = { name: target, count: Math.max(1, count) };
     }
     return scrapYields;
+  }
+
+  // -------------------------------------------------------------------
+  // "Open" action (ammo boxes, quest-reward bundles, resource bundles) -- a
+  // direct port of build.py's load_open_yields(); see its comment for the
+  // full writeup. Unrelated to Scrap/Recycle above: this is the item's own
+  // primary-use action (Action0), not anything derived from Material/
+  // Weight -- an item whose Action0 resolves (through its own Extends
+  // chain) to Class "OpenBundle" is "opened" into whatever Create_item
+  // names, Create_item_count each (both comma-separated in lockstep for a
+  // multi-item bundle).
+  // -------------------------------------------------------------------
+  function action0Element(el) {
+    for (const prop of Array.from(el.getElementsByTagName("property"))) {
+      if (attr(prop, "class") === "Action0") return prop;
+    }
+    return null;
+  }
+
+  // Some bundles ALSO carry a second, random-pick layer in the same
+  // Action0 -- Random_item (the candidate pool), Random_item_count
+  // (POSITIONAL to Random_item -- index i is candidate i's own count,
+  // missing trailing entries default to 1), Random_count (how many
+  // candidates actually get drawn, independent of the count list's
+  // length -- defaults to the whole pool when omitted), and
+  // Unique_random_only (drawn candidates never repeat). See build.py's
+  // load_open_bundle_props for the full writeup, including the
+  // questRewardT0LightArmorBundle evidence (5 candidates, 5 counts,
+  // Random_count=2) that pins down the count list being keyed to the pool
+  // rather than to how many get drawn.
+  const OPEN_ACTION0_PROPS = [
+    ["Class", "class"],
+    ["Create_item", "createItem"],
+    ["Create_item_count", "createItemCount"],
+    ["Random_item", "randomItem"],
+    ["Random_item_count", "randomItemCount"],
+    ["Random_count", "randomCount"],
+    ["Unique_random_only", "uniqueRandomOnly"],
+  ];
+
+  async function loadOpenBundleProps(paths) {
+    const raw = {};
+    const files = [paths.baseItemFile].concat(paths.itemFiles);
+    for (const fileRef of files) {
+      if (!fileRef.handle) continue;
+      const doc = await readAndParse(fileRef);
+      if (!doc) continue;
+      for (const tag of ITEM_BLOCK_TAGS) {
+        for (const el of scanBlocks(doc, tag)) {
+          const name = attr(el, "name") || nameFromXpath(attr(el, "xpath"));
+          if (!name) continue;
+          const action0 = action0Element(el);
+          if (!action0) continue;
+          let entry = null;
+          for (const [pname, key] of OPEN_ACTION0_PROPS) {
+            const value = firstPropertyValue(action0, pname);
+            if (value === null) continue;
+            entry = entry || raw[name] || (raw[name] = {});
+            entry[key] = value;
+          }
+        }
+      }
+    }
+    return raw;
+  }
+
+  // "1-4" -> [1, 4]; "5" -> [5, 5]. Create_item_count/Random_item_count's
+  // own range syntax is a DASH, unlike harvest/recycle's comma-separated
+  // min,max -- a different property entirely, not reused.
+  function parseOpenCount(rawCount) {
+    const parts = rawCount.split("-");
+    const lo = parseInt(parts[0], 10);
+    const hi = parseInt(parts[parts.length - 1], 10);
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return [1, 1];
+    return [Math.max(1, lo), Math.max(1, hi)];
+  }
+
+  // Splits a Create_item/Random_item-style comma list of names against its
+  // OWN comma list of counts BY INDEX -- item i's count is counts[i]; a
+  // shorter count list's missing trailing entries default to 1.
+  function positionalOpenCounts(itemNames, countsAttr) {
+    const counts = (countsAttr || "").split(",").map((s) => s.trim()).filter(Boolean);
+    return itemNames.map((iname, i) => {
+      const rawCount = i < counts.length ? counts[i] : counts.length === 1 ? counts[0] : "1";
+      const [lo, hi] = parseOpenCount(rawCount);
+      return { name: iname, countMin: lo, countMax: hi };
+    });
+  }
+
+  async function loadOpenYields(paths, allNames, extendsMap) {
+    const raw = await loadOpenBundleProps(paths);
+
+    function resolve(name) {
+      const seen = new Set();
+      let cur = name;
+      const result = {};
+      while (cur && !seen.has(cur)) {
+        seen.add(cur);
+        const entry = raw[cur] || {};
+        for (const [, key] of OPEN_ACTION0_PROPS) {
+          if (!(key in result) && key in entry) result[key] = entry[key];
+        }
+        cur = extendsMap[cur];
+      }
+      return result;
+    }
+
+    const openYields = {};
+    for (const nm of allNames) {
+      const resolved = resolve(nm);
+      if (resolved.class !== "OpenBundle") continue;
+
+      let items = [];
+      if (resolved.createItem) {
+        const itemNames = resolved.createItem.split(",").map((s) => s.trim()).filter(Boolean);
+        items = positionalOpenCounts(itemNames, resolved.createItemCount);
+      }
+
+      let random = null;
+      if (resolved.randomItem) {
+        const poolNames = resolved.randomItem.split(",").map((s) => s.trim()).filter(Boolean);
+        const pool = positionalOpenCounts(poolNames, resolved.randomItemCount);
+        if (pool.length) {
+          const parsedPick = parseInt(resolved.randomCount, 10);
+          const pickCount = Number.isFinite(parsedPick) ? parsedPick : pool.length;
+          random = {
+            pickCount: Math.max(1, Math.min(pickCount, pool.length)),
+            unique: resolved.uniqueRandomOnly === "true",
+            pool,
+          };
+        }
+      }
+
+      if (items.length || random) openYields[nm] = { items, random };
+    }
+    return openYields;
   }
 
   // -------------------------------------------------------------------
@@ -1102,7 +1289,15 @@ window.ULModBuddyBuilder = (function () {
       }
     }
     for (const name in repairs) {
-      repairs[name].sort((a, b) => (parseFloat(a.damage) || 0) - (parseFloat(b.damage) || 0));
+      // Parsed once per tier (not inside the comparator, which JS calls
+      // several times per element) so a bad value only warns once.
+      for (const tier of repairs[name]) {
+        tier._damageSort = tier.damage
+          ? safeFloat(tier.damage, 0, `${paths.recipeVehiclesFile.label} vehicle repair tier damage`)
+          : 0;
+      }
+      repairs[name].sort((a, b) => a._damageSort - b._damageSort);
+      for (const tier of repairs[name]) delete tier._damageSort;
     }
     return repairs;
   }
@@ -1482,6 +1677,16 @@ window.ULModBuddyBuilder = (function () {
       allNames.add(scrapYields[sourceName].name);
     }
 
+    log('Loading "Open" bundle data (ammo boxes, quest/resource bundles)...');
+    const openYields = await loadOpenYields(paths, allNames, extendsMap);
+    log(`  ${Object.keys(openYields).length} openable name(s) resolved`);
+    for (const sourceName in openYields) {
+      allNames.add(sourceName);
+      const y = openYields[sourceName];
+      for (const e of y.items) allNames.add(e.name);
+      if (y.random) for (const e of y.random.pool) allNames.add(e.name);
+    }
+
     const nameFallbackUsed = [];
     for (const nm of allNames) {
       if (!(nm in names)) {
@@ -1592,6 +1797,7 @@ window.ULModBuddyBuilder = (function () {
           recycleYieldItems: Object.keys(recycleYields).length,
           recycleSourceRows: Object.values(recycleSources).reduce((s, v) => s + v.length, 0),
           scrapYieldItems: Object.keys(scrapYields).length,
+          openYieldItems: Object.keys(openYields).length,
           itemMods: itemMods.size,
           vehicles: Object.keys(vehicles).length,
           vehicleRepairRecipes: Object.values(vehicleRepairs).reduce((s, t) => s + t.length, 0),
@@ -1608,6 +1814,7 @@ window.ULModBuddyBuilder = (function () {
       recycleYields,
       recycleSources,
       scrapYields,
+      openYields,
       itemMods: [...itemMods].sort(),
       vehicles,
       vehicleColorVariants,

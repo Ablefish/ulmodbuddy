@@ -11,8 +11,9 @@ mod for *7 Days to Die*, built directly from your own install:
   down to raw materials: ingredients, research prerequisites, workstations,
   tools, and every way to acquire each one (Craft / Loot / Buy / Harvest /
   Recycle / Quest).
-- **Scraps Into** and **Recycles Into** -- what breaking an item down gives
-  back, in your inventory or at a Recycler.
+- **Opens Into**, **Scraps Into**, and **Recycles Into** -- what a bundle
+  or ammo box unpacks into, and what breaking an item down gives back, in
+  your inventory or at a Recycler.
 - **Harvest** and **Recycle Sources** -- every source for a given item,
   ranked by expected yield.
 - **Research Tree** -- a visual map of each research category; hover a

@@ -655,21 +655,46 @@ def load_acquisition_channels():
             if el.attrib.get("type") == "Item":
                 rewardable.add(rid)
             elif el.attrib.get("type") == "LootItem":
-                _flatten_group(rid, loot_groups, visited, rewardable)
+                # A LootItem reward's id is routinely a COMMA LIST of
+                # alternate group choices (e.g. "groupSchematics,groupBooks"
+                # -- 272 of these in the current install), not always the
+                # single group name type="Item" rewards use -- flattening
+                # the whole comma string as one group name would silently
+                # match nothing, since no group is ever actually named that.
+                for group_name in rid.split(","):
+                    group_name = group_name.strip()
+                    if group_name:
+                        _flatten_group(group_name, loot_groups, visited, rewardable)
     else:
         warn(f"missing expected file: {QUESTS_FILE}")
 
     return purchasable, lootable, rewardable
 
 
-def _parse_count_range(count_attr):
+def _safe_float(value, default, context=None):
+    """Never crashes the whole build over one bad numeric value -- warns and
+    falls back instead. `context` is a short string identifying where the
+    value came from (e.g. "blocks.xml <drop name='X'> prob"), so a future
+    bad value is traceable rather than just producing a silent 0/default."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        if context:
+            warn(f"{context}: expected a number, got {value!r} -- using {default}")
+        return default
+
+
+def _parse_count_range(count_attr, context=None):
     """"3,5" -> (3, 5); "1" -> (1, 1). Every count attribute seen in the
     source is either a bare integer or a comma-separated min,max pair --
-    never a dash range -- so this is deliberately not more permissive."""
+    never a dash range -- so this is deliberately not more permissive.
+    Falls back to (1, 1) rather than crashing the whole build if a future
+    value doesn't fit either shape (see xml_value_shapes.py for how to
+    re-check that assumption against a new mod version)."""
     parts = count_attr.split(",")
-    lo = int(float(parts[0]))
-    hi = int(float(parts[-1]))
-    return lo, hi
+    lo = _safe_float(parts[0], 1.0, context)
+    hi = _safe_float(parts[-1], lo, context)
+    return int(lo), int(hi)
 
 
 def _expected_yield(s):
@@ -831,13 +856,14 @@ def load_harvest_sources():
                 if not name or count_attr == "0":
                     continue
                 harvestable.add(name)
-                count_min, count_max = _parse_count_range(count_attr)
+                ctx = f"{path.name} <drop name=\"{name}\">"
+                count_min, count_max = _parse_count_range(count_attr, f"{ctx} count")
                 harvest_sources.setdefault(name, []).append({
                     "block": block_name,
                     "event": el.attrib.get("event", "Harvest"),
                     "countMin": count_min,
                     "countMax": count_max,
-                    "prob": float(el.attrib.get("prob", "1")),
+                    "prob": _safe_float(el.attrib.get("prob", "1"), 1.0, f"{ctx} prob"),
                 })
     for name, sources in harvest_sources.items():
         collapsed = _collapse_same_block_events(sources)
@@ -912,12 +938,13 @@ def load_recycle_data():
                      f"(a comma-range, never valid for a probability) -- treated as the count "
                      f"attribute the author meant, prob=1")
                 count_attr, prob_attr = prob_attr, "1"
-            count_min, count_max = _parse_count_range(count_attr or "1")
+            ctx = f"{RECYCLE_FILE.name} <output name=\"{out_name}\">"
+            count_min, count_max = _parse_count_range(count_attr or "1", f"{ctx} count")
             outputs.append({
                 "name": out_name,
                 "countMin": count_min,
                 "countMax": count_max,
-                "prob": float(prob_attr),
+                "prob": _safe_float(prob_attr, 1.0, f"{ctx} prob"),
             })
         if not input_names or not outputs:
             continue
@@ -941,15 +968,24 @@ def load_recycle_data():
 # Recycler above, and not documented as its own table anywhere in the XML.
 # Empirically reverse-engineered by scrapping real items in-game and
 # comparing to their source data:
-#   - the OUTPUT type comes from the item/block's `Material` property,
-#     looked up in materials.xml for that material's `forge_category`:
+#   - the OUTPUT type comes from the item/block's `ScrapMaterial` property
+#     when it has one, else its plain `Material` -- looked up in
+#     materials.xml for that material's `forge_category`:
 #       - if forge_category itself names a real item/block (true for
 #         weapon/tool/armor "Parts" items, e.g. Material MHandGunParts ->
 #         forge_category "gunHandgunT1PistolParts"), that IS the output;
 #       - otherwise forge_category is a bare category word (e.g. "iron",
 #         "wood") that resolves to a real item by naming convention:
-#         resourceScrap<Cap>, ulmResourceScrap<Cap>, or (six vanilla
-#         elements only) unit_<category>.
+#         resourceScrap<Cap>, ulmResourceScrap<Cap>, ulmResource<Cap>, or
+#         (six vanilla elements only) unit_<category>.
+#     ScrapMaterial exists specifically to say "scrap this as if it were
+#     made of a DIFFERENT material than Material itself implies" -- every
+#     research-resource item (e.g. Biology Research) is a clear example:
+#     its own Material is its own type-specific research material (whose
+#     forge_category points right back at itself, so using Material here
+#     would make it scrap into itself), while ScrapMaterial uniformly
+#     names the plain "research" material so it scraps into Basic
+#     Research like every other specialized research type does.
 #   - the COUNT is ceil(Weight / 10) -- confirmed independent of the
 #     item's quality/condition at scrap time (a damaged and a
 #     freshly-repaired copy of the same item yielded the same count).
@@ -988,40 +1024,46 @@ def load_material_forge_categories():
 
 def load_material_weight_props():
     """Returns (props, all_ids): `props` is {name: (material, weight)} for
-    every <item>/<block> that directly carries BOTH a `Material` and a
-    `Weight` property (base game first, mod overriding); `all_ids` is every
-    <item>/<block> name seen at all, base or mod, regardless of whether it
-    has those properties -- needed to check whether a forge_category (or a
-    resourceScrap<Cap> guess) names a real thing."""
-    props = {}
+    every <item>/<block> whose full set of patches (its own base block plus
+    any <set>/<append> xpath patches targeting it -- see ITEM_BLOCK_RE)
+    together carry a `Weight` property plus either `ScrapMaterial` or
+    `Material` (base game first, mod overriding; ScrapMaterial wins when
+    both are present -- see the module docstring above for why). Unlike
+    most of this file's other scans, this one MUST follow <set>/<append>:
+    ~90 skill books define ScrapMaterial/Weight only via an <append> onto
+    an item whose own <item> block never carries Material/Weight at all,
+    so skipping patches would leave every one of them "not scrappable".
+    `all_ids` is every <item>/<block> name seen at all, base or mod,
+    regardless of whether it has those properties -- needed to check
+    whether a forge_category (or a resourceScrap<Cap> guess) names a real
+    thing."""
+    raw = {}  # name -> {"material":..., "scrap_material":..., "weight":...}
     all_ids = set()
     files = (
-        [(BASE_ITEM_FILE, "item"), (BASE_BLOCK_FILE, "block")]
-        + [(p, "item") for p in ITEM_FILES]
-        + [(p, "block") for p in BLOCK_FILES]
+        [BASE_ITEM_FILE, BASE_BLOCK_FILE]
+        + ITEM_FILES
+        + BLOCK_FILES
     )
-    for path, tag in files:
+    for path in files:
         if not path.exists():
             continue
         text = read_text(path)
-        for frag in scan_blocks(text, tag):
-            el = parse_fragment(frag, path.name)
-            if el is None:
-                continue
-            name = el.attrib.get("name")
+        for tag, name_a, name_b, body in ITEM_BLOCK_RE.findall(text):
+            name = name_a or name_b
             if not name:
                 continue
             all_ids.add(name)
-            material = weight = None
-            for child in el:
-                if child.tag == "property":
-                    pname = child.attrib.get("name")
-                    if pname == "Material":
-                        material = child.attrib.get("value")
-                    elif pname == "Weight":
-                        weight = child.attrib.get("value")
-            if material and weight:
-                props[name] = (material, weight)
+            entry = raw.setdefault(name, {})
+            for pname, key in (("Material", "material"), ("ScrapMaterial", "scrap_material"), ("Weight", "weight")):
+                m = re.search(rf'<property name="{pname}" value="([^"]*)"', body)
+                if m:
+                    entry[key] = m.group(1)
+    props = {}
+    for name, entry in raw.items():
+        effective_material = entry.get("scrap_material") or entry.get("material")
+        weight = entry.get("weight")
+        if effective_material and weight:
+            props[name] = (effective_material, weight)
     return props, all_ids
 
 
@@ -1047,7 +1089,11 @@ def resolve_scrap_target(forge_category, all_ids):
     if forge_category in all_ids:
         return forge_category
     cap = forge_category[0].upper() + forge_category[1:]
-    for candidate in (f"resourceScrap{cap}", f"ulmResourceScrap{cap}", f"unit_{forge_category}"):
+    # ulmResource<Cap> last: the one confirmed case (forge_category
+    # "research" -> item "ulmResourceResearch") doesn't follow the
+    # resourceScrap<Cap>/ulmResourceScrap<Cap> naming the other bare-word
+    # categories do, so it's tried only after those miss.
+    for candidate in (f"resourceScrap{cap}", f"ulmResourceScrap{cap}", f"unit_{forge_category}", f"ulmResource{cap}"):
         if candidate in all_ids:
             return candidate
     return None
@@ -1076,6 +1122,180 @@ def load_scrap_data(all_names, extends_map):
             count = 1
         scrap_yields[nm] = {"name": target, "count": count}
     return scrap_yields
+
+
+# ---------------------------------------------------------------------------
+# "Open" action (ammo boxes, quest-reward bundles, resource bundles) --
+# unrelated to Scrap/Recycle above: this is the item's own primary-use
+# action (Action0), not anything derived from Material/Weight. Declared
+# plainly in the XML rather than reverse-engineered: an item whose Action0
+# resolves (through its own Extends chain, same pattern as everything else
+# in this file) to
+#   <property class="Action0"><property name="Class" value="OpenBundle"/>...
+# is "opened" (not crafted or scrapped) into whatever Create_item names, at
+# Create_item_count each -- both comma-separated lists in lockstep for a
+# multi-item bundle (e.g. Blade Trap Bundle -> 10 Blade Trap, 5 Switch, 5
+# Electric Wire Relay, 3 Traps Skill Magazine each), a single value for
+# everything else (e.g. a "Box of X Ammo" always unpacks to one ammo type;
+# Create_item_count is 1 per item when omitted entirely).
+# Covers two distinct in-game categories under this one mechanic: ammo
+# boxes (also independently craftable via their own ordinary <recipe> --
+# already handled like any other recipe, nothing extra needed there) and
+# quest-reward/resource bundles (never craftable, only ever a quest reward
+# or loot drop).
+#
+# Some bundles ALSO carry a second, random-pick layer in the same Action0:
+#   Random_item="a,b,c,d,e,f"          -- the candidate pool
+#   Random_item_count="11-30,...,1"    -- POSITIONAL to Random_item (index i
+#                                          is candidate i's own count/range);
+#                                          a short list's missing trailing
+#                                          entries default to 1
+#   Random_count="2"                   -- how many candidates actually get
+#                                          drawn at open time (independent of
+#                                          the count list's length -- defaults
+#                                          to the whole pool, i.e. "no real
+#                                          randomness in which, just in the
+#                                          count", when omitted)
+#   Unique_random_only="true"          -- drawn candidates are never repeated
+# This isn't documented anywhere as a table, and unlike Create_item (a
+# flat, deterministic list we can just print) it describes a genuine dice
+# roll -- confirmed via questRewardT0LightArmorBundle, which has a full
+# 5-candidate/5-count 1:1 list yet Random_count=2 (proving the count list
+# is keyed to the POOL, not to how many get drawn). Rendered as its own
+# "random pick(s)" section, explicitly labeled unvalidated (see
+# app.js/renderOpenYieldCard) since the selection ALGORITHM itself (weighted?
+# uniform? does a repeated pool entry like AutoTurretBundle's 6x-same-item
+# list bias the odds?) is still inferred from XML shape, not confirmed by
+# in-game testing.
+# ---------------------------------------------------------------------------
+def load_open_bundle_props():
+    """Returns {name: {"class":..., "create_item":..., "create_item_count":...,
+    "random_item":..., "random_item_count":..., "random_count":...,
+    "unique_random_only":...}}, merged per name across every item/set/append
+    patch that touches it (base game first, mod overriding/adding) -- these
+    are routinely set in separate patches for the same item, same as
+    ScrapMaterial/Weight in load_material_weight_props."""
+    raw = {}
+    for path in [BASE_ITEM_FILE] + ITEM_FILES:
+        if not path.exists():
+            continue
+        text = read_text(path)
+        for tag, name_a, name_b, body in ITEM_BLOCK_RE.findall(text):
+            name = name_a or name_b
+            if not name:
+                continue
+            m = re.search(r'<property class="Action0">(.*?)</property>', body, re.S)
+            if not m:
+                continue
+            action_body = m.group(1)
+            entry = raw.setdefault(name, {})
+            for pname, key in (
+                ("Class", "class"),
+                ("Create_item", "create_item"),
+                ("Create_item_count", "create_item_count"),
+                ("Random_item", "random_item"),
+                ("Random_item_count", "random_item_count"),
+                ("Random_count", "random_count"),
+                ("Unique_random_only", "unique_random_only"),
+            ):
+                pm = re.search(rf'<property name="{pname}" value="([^"]*)"', action_body)
+                if pm:
+                    entry[key] = pm.group(1)
+    return raw
+
+
+def _parse_open_count(raw_count):
+    """"1-4" -> (1, 4); "5" -> (5, 5). Create_item_count's own range syntax
+    is a DASH, unlike harvest/recycle's comma-separated min,max
+    (_parse_count_range) -- a different property entirely, not reused."""
+    parts = raw_count.split("-")
+    try:
+        lo = int(float(parts[0]))
+        hi = int(float(parts[-1]))
+    except ValueError:
+        return 1, 1
+    return max(1, lo), max(1, hi)
+
+
+def _positional_open_counts(item_names, counts_attr):
+    """Splits a Create_item/Random_item-style comma list of names against
+    its OWN comma list of counts BY INDEX -- item i's count is counts[i];
+    a shorter count list's missing trailing entries default to 1 (except
+    the single-count-for-everyone shorthand, e.g. Create_item_count="1000"
+    for one item, which is handled the same way since len(counts) == 1 ==
+    len(item_names) in that case already)."""
+    counts = [s.strip() for s in (counts_attr or "").split(",") if s.strip()]
+    entries = []
+    for i, iname in enumerate(item_names):
+        if i < len(counts):
+            raw_count = counts[i]
+        elif len(counts) == 1:
+            raw_count = counts[0]
+        else:
+            raw_count = "1"
+        lo, hi = _parse_open_count(raw_count)
+        entries.append({"name": iname, "countMin": lo, "countMax": hi})
+    return entries
+
+
+def load_open_yields(all_names, extends_map):
+    """Returns {name: {"items": [{"name","countMin","countMax"}, ...],
+    "random": None | {"pickCount": N, "unique": bool, "pool": [same shape
+    as items]}}} for every name that resolves (through its own Extends
+    chain) to Action0 Class == "OpenBundle", scoped to `all_names` like
+    load_scrap_data. "items" is the deterministic Create_item list (empty
+    list for a pure-random bundle); "random" is the inferred random-pick
+    layer described in this section's own comment above, or None for a
+    bundle that doesn't have one."""
+    raw = load_open_bundle_props()
+
+    def resolve(name):
+        seen = set()
+        cur = name
+        result = {}
+        while cur and cur not in seen:
+            seen.add(cur)
+            entry = raw.get(cur, {})
+            for k in (
+                "class", "create_item", "create_item_count",
+                "random_item", "random_item_count", "random_count", "unique_random_only",
+            ):
+                if k not in result and k in entry:
+                    result[k] = entry[k]
+            cur = extends_map.get(cur)
+        return result
+
+    open_yields = {}
+    for nm in all_names:
+        resolved = resolve(nm)
+        if resolved.get("class") != "OpenBundle":
+            continue
+
+        items = []
+        create_item = resolved.get("create_item")
+        if create_item:
+            item_names = [s.strip() for s in create_item.split(",") if s.strip()]
+            items = _positional_open_counts(item_names, resolved.get("create_item_count"))
+
+        random_pool = None
+        random_item = resolved.get("random_item")
+        if random_item:
+            pool_names = [s.strip() for s in random_item.split(",") if s.strip()]
+            pool = _positional_open_counts(pool_names, resolved.get("random_item_count"))
+            if pool:
+                try:
+                    pick_count = int(float(resolved["random_count"])) if resolved.get("random_count") else len(pool)
+                except ValueError:
+                    pick_count = len(pool)
+                random_pool = {
+                    "pickCount": max(1, min(pick_count, len(pool))),
+                    "unique": resolved.get("unique_random_only") == "true",
+                    "pool": pool,
+                }
+
+        if items or random_pool:
+            open_yields[nm] = {"items": items, "random": random_pool}
+    return open_yields
 
 
 # ---------------------------------------------------------------------------
@@ -1382,7 +1602,7 @@ def load_vehicle_repairs(vehicle_names):
         for name in matched:
             repairs.setdefault(name, []).append(tier)
     for tiers in repairs.values():
-        tiers.sort(key=lambda t: float(t["damage"]) if t["damage"] else 0)
+        tiers.sort(key=lambda t: _safe_float(t["damage"], 0.0, f"{RECIPE_VEHICLES_FILE.name} vehicle repair tier damage") if t["damage"] else 0)
     return repairs
 
 
@@ -1401,10 +1621,16 @@ def load_vehicle_repairs(vehicle_names):
 # correctly whichever alternative actually matched, so this one addition
 # covers <item_modifier> everywhere ITEM_BLOCK_RE is used (CustomIcon AND
 # Extends scanning both, since load_extends_graph() reuses this same regex).
+#
+# `'\s*\]` (not just `'\]`) in the xpath alternative: many of the mod's own
+# xpath patches hand-align the closing `]` with tabs for readability, e.g.
+# `xpath="/items/item[@name='bookFiremansAlmanacHeat'\t\t\t\t]"` -- without
+# tolerating that whitespace, every one of those appends silently fails to
+# match at all, not just loses one property from it.
 # ---------------------------------------------------------------------------
 ITEM_BLOCK_RE = re.compile(
     r"<(item_modifier|item|set|append|block)\s+"
-    r"(?:name=\"([^\"]+)\"|xpath=\"[^\"]*\[@name='([^']+)'\][^\"]*\")"
+    r"(?:name=\"([^\"]+)\"|xpath=\"[^\"]*\[@name='([^']+)'\s*\][^\"]*\")"
     r"[^>]*>(.*?)</\1>",
     re.S,
 )
@@ -1481,7 +1707,7 @@ def resolve_icon(name, icon_index, custom_icons, used_icons):
 # ---------------------------------------------------------------------------
 BLOCK_TAG_RE = re.compile(
     r"<(block|set|append)\s+"
-    r"(?:name=\"([^\"]+)\"|xpath=\"[^\"]*\[@name='([^']+)'\][^\"]*\")"
+    r"(?:name=\"([^\"]+)\"|xpath=\"[^\"]*\[@name='([^']+)'\s*\][^\"]*\")"
     r"[^>]*>(.*?)</\1>",
     re.S,
 )
@@ -1867,6 +2093,17 @@ def main(install_root):
         all_names.add(source_name)
         all_names.add(y["name"])
 
+    print('Loading "Open" bundle data (ammo boxes, quest/resource bundles)...')
+    open_yields = load_open_yields(all_names, extends_map)
+    print(f"  {len(open_yields)} openable name(s) resolved")
+    for source_name, y in open_yields.items():
+        all_names.add(source_name)
+        for e in y["items"]:
+            all_names.add(e["name"])
+        if y["random"]:
+            for e in y["random"]["pool"]:
+                all_names.add(e["name"])
+
     name_fallback_used = []
     for nm in all_names:
         if nm not in names:
@@ -1993,6 +2230,7 @@ def main(install_root):
                 "recycleYieldItems": len(recycle_yields),
                 "recycleSourceRows": sum(len(v) for v in recycle_sources.values()),
                 "scrapYieldItems": len(scrap_yields),
+                "openYieldItems": len(open_yields),
                 "itemMods": len(item_mods),
                 "vehicles": len(vehicles),
                 "vehicleRepairRecipes": sum(len(t) for t in vehicle_repairs.values()),
@@ -2008,6 +2246,7 @@ def main(install_root):
         "recycleYields": recycle_yields,
         "recycleSources": recycle_sources,
         "scrapYields": scrap_yields,
+        "openYields": open_yields,
         "itemMods": sorted(item_mods),
         "vehicles": vehicles,
         "vehicleColorVariants": vehicle_color_variants,

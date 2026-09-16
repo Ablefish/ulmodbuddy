@@ -559,6 +559,12 @@ img.icon-ring-workstation {
   background: var(--panel-alt);
   border: 1px solid var(--border);
   color: var(--text-dim);
+  /* Fixed so every badge in a given slot (Recycle/Quest/Harvest/Craft/
+     Loot/Buy, always in that order) lines up at the same x position from
+     row to row, like a table column -- wide enough for "Harvest", the
+     longest label. */
+  min-width: 50px;
+  text-align: center;
 }
 .acq-badge-craftable { border-color: var(--acq-craftable); color: var(--acq-craftable); }
 .acq-badge-harvestable { border-color: var(--acq-harvestable); color: var(--acq-harvestable); }
@@ -567,21 +573,35 @@ img.icon-ring-workstation {
 .acq-badge-rewardable { border-color: var(--acq-rewardable); color: var(--acq-rewardable); }
 .acq-badge-recyclable { border-color: var(--acq-recyclable); color: var(--acq-recyclable); }
 
+/* A channel this item doesn't have -- kept in the DOM (not skipped) so its
+   column still reserves its slot; invisible rather than just blank so it
+   never reads as a real (if empty-looking) badge. */
+.acq-badge-empty {
+  visibility: hidden;
+}
+
 /* Harvest and Recycle are the two badges that are ever interactive (see the
-   shared source modal below) -- a filled hover state instead of just a
-   cursor change, so each reads as clickable rather than looking broken.
-   Each badge type's hover fills with ITS OWN color (not a single hardcoded
-   one), since there's more than one clickable channel now. */
+   shared source modal below) -- solid-filled with white text rather than
+   the usual outline, so a clickable badge reads as a little button at a
+   glance instead of just another fact, not only on hover. Each badge
+   type fills with ITS OWN color (not a single hardcoded one), since
+   there's more than one clickable channel now; brightens further on
+   hover as the interactive affordance the filled state doesn't already
+   cover. */
 .acq-badge-clickable {
   cursor: pointer;
+  color: #fff;
 }
-.acq-badge-harvestable.acq-badge-clickable:hover {
+.acq-badge-harvestable.acq-badge-clickable {
   background: var(--acq-harvestable);
-  color: var(--bg);
+  border-color: var(--acq-harvestable);
 }
-.acq-badge-recyclable.acq-badge-clickable:hover {
+.acq-badge-recyclable.acq-badge-clickable {
   background: var(--acq-recyclable);
-  color: var(--bg);
+  border-color: var(--acq-recyclable);
+}
+.acq-badge-clickable:hover {
+  filter: brightness(1.25);
 }
 
 /* Pushes a name's acquisition badges to the right edge of whatever flex row

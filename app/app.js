@@ -945,12 +945,18 @@ window.ULModBuddyApp = (function () {
   // loose inline badges, so it pushes to the right edge of whatever
   // flex row it lands in -- the item name reads easier when it isn't
   // competing with a run of badges immediately after it.
+  //
+  // Every one of the 6 channels always gets a slot, in the same fixed
+  // order, whether or not this name actually has that badge -- a missing
+  // one renders as an invisible placeholder (.acq-badge-empty) rather than
+  // being skipped, so every row's badges line up in the same fixed
+  // columns regardless of which channels a given item actually has, the
+  // same table-like alignment .ing-count already gives quantities.
   function acquisitionBadges(name) {
     const acq = data.acquisition && data.acquisition[name];
-    if (!acq) return "";
     const badges = Object.keys(ACQUISITION_LABELS)
-      .filter((k) => acq[k])
       .map((k) => {
+        if (!acq || !acq[k]) return `<span class="acq-badge acq-badge-empty" aria-hidden="true"></span>`;
         const link = ACQUISITION_SOURCE_LINKS[k];
         const sources = link && link.sources()[name];
         if (sources && sources.length) {
@@ -1749,6 +1755,50 @@ window.ULModBuddyApp = (function () {
     return html;
   }
 
+  function openYieldListHtml(entries) {
+    return entries
+      .map((o) => {
+        const countLabel = o.countMin === o.countMax ? `${o.countMin}` : `${o.countMin}–${o.countMax}`;
+        return `<li>${reportRowIcon(o.name)}<span class="ing-count">${countLabel}&times;</span>${jumpSpan(o.name, displayName(o.name))}</li>`;
+      })
+      .join("");
+  }
+
+  // Straight from data.openYields (build.py's load_open_yields) -- the
+  // item's own primary-use ("Open") action, e.g. a "Box of AP Robotic
+  // Turret Ammo (1000)" opening into 1000 loose ammo, or a quest-reward
+  // "Blade Trap Bundle" opening into several different items at once.
+  // Unlike Scraps/Recycles Into (universal facts worth stating either way,
+  // so always shown even as "Not scrappable"), only a small, specific set
+  // of items can be opened at all -- the section is skipped entirely
+  // rather than saying "doesn't open into anything" on every other page.
+  //
+  // Some bundles ALSO roll a random pick from a pool (data.openYields[x].
+  // random) on top of their fixed items -- shown as its own sub-section,
+  // explicitly flagged unvalidated: the pool/count-per-candidate shape is
+  // read straight from the XML (see build.py's load_open_bundle_props for
+  // the evidence pinning down what each field means), but the actual
+  // in-game selection algorithm has never been confirmed by play-testing.
+  function renderOpenYieldCard(name) {
+    const opens = data.openYields && data.openYields[name];
+    if (!opens || (!opens.items.length && !opens.random)) return "";
+    let html = `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Opens Into</div>`;
+    html += `<div class="variant-card">`;
+    if (opens.items.length) {
+      html += `<ul class="ingredient-list">${openYieldListHtml(opens.items)}</ul>`;
+    }
+    if (opens.random) {
+      const r = opens.random;
+      const pickLabel = `${r.pickCount}${r.unique ? " unique" : ""} random pick${r.pickCount === 1 ? "" : "s"}`;
+      if (opens.items.length) html += `<div class="req-flag-dim" style="margin-top:10px;">plus ${pickLabel} from:</div>`;
+      else html += `<div class="req-flag-dim">${pickLabel} from:</div>`;
+      html += `<ul class="ingredient-list">${openYieldListHtml(r.pool)}</ul>`;
+      html += `<div class="warning-note">Random-pick contents are inferred from the mod's own data (candidate pool, per-candidate count, and how many get drawn) -- not confirmed by in-game testing, so treat the exact selection odds as unvalidated.</div>`;
+    }
+    html += `</div>`;
+    return html;
+  }
+
   // Straight from data.scrapYields (build.py's load_scrap_data) -- like
   // Recycles Into, a flat terminal fact rather than a toggleable tree, but
   // simpler: the in-inventory Scrap action always yields exactly one
@@ -1887,25 +1937,28 @@ window.ULModBuddyApp = (function () {
     if (kind !== "item") {
       html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Research Required${report.researchCount ? ` (${report.researchCount})` : ""}</div>`;
       html += renderUnlockChainCard(report);
-      html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Workstations${report.workstationNodes.length ? ` (${report.workstationNodes.length})` : ""}</div>`;
+      html += `<div class="section-label" style="font-size:15px;color:var(--workstation);margin-top:20px;">Workstations${report.workstationNodes.length ? ` (${report.workstationNodes.length})` : ""}</div>`;
       html += renderWorkstationsCard(report);
       html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Tools${report.toolNodes.length ? ` (${report.toolNodes.length})` : ""}</div>`;
       html += renderToolsCard(report);
     }
 
-    // A research node isn't itself a scrappable/recyclable item -- it just
-    // happens to share its internal name with the item/recipe it unlocks,
-    // which is where any scrapYields/recycleYields entry for that name
-    // actually belongs. Scraps Into shown above Recycles Into: in practice
-    // very few names have both (the two mechanics apply to different kinds
-    // of items -- gear you scrap in your inventory vs. materials fed
-    // through the Recycler block).
+    // A research node isn't itself an openable/scrappable/recyclable item --
+    // it just happens to share its internal name with the item/recipe it
+    // unlocks, which is where any openYields/scrapYields/recycleYields
+    // entry for that name actually belongs. Opens Into shown above Scraps
+    // Into shown above Recycles Into: in practice very few names have more
+    // than one (they're three different kinds of item -- a bundle you open,
+    // gear you scrap in your inventory, materials fed through the Recycler
+    // block).
     if (kind !== "research") {
+      html += renderOpenYieldCard(name);
+
       html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Scraps Into</div>`;
       html += renderScrapYieldCard(name);
 
       const recycleOutputs = data.recycleYields && data.recycleYields[name];
-      html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Recycles Into${recycleOutputs ? ` (${recycleOutputs.length})` : ""}</div>`;
+      html += `<div class="section-label" style="font-size:15px;color:var(--acq-recyclable);margin-top:20px;">Recycles Into${recycleOutputs ? ` (${recycleOutputs.length})` : ""}</div>`;
       html += renderRecycleYieldsCard(name);
     }
 

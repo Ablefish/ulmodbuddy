@@ -3,6 +3,60 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.0] - 2026-09-16
+
+### Added
+
+- **Opens Into**, on every item's detail page, for the items that have an
+  in-game "Open" action of their own -- an ammo box (e.g. "Box of AP
+  Robotic Turret Ammo (1000)") or a quest-reward/resource bundle (e.g.
+  Blade Trap Bundle). Some bundles also roll a random pick from a pool on
+  top of their fixed contents (e.g. the Farm Bundle's guaranteed plot plus
+  3 random plant picks) -- shown as its own clearly-labeled sub-section,
+  since the exact selection odds are inferred from the mod's own data
+  rather than confirmed by play-testing.
+
+### Fixed
+
+- **Biology Research and its five sibling specialized research resources
+  no longer scrap into themselves.** Each one carries its own `Material`
+  (used for other purposes) plus a separate `ScrapMaterial` specifically
+  for scrap-target resolution, and the build was only reading the former
+  -- Biology Research now correctly scraps into 1x Basic Research, same as
+  the others.
+- **~90 skill books now scrap into their own correct research type**
+  instead of showing "Not scrappable." They only carry `ScrapMaterial`/
+  `Weight` via a patch onto a shared base item, which the scrap resolver
+  wasn't reading at all before -- it now follows the mod's own `<set>`/
+  `<append>` patches, not just literal `<item>` blocks.
+- **A tab-padded XML pattern was silently failing to match** wherever the
+  mod hand-aligns a patch's `xpath="...[@name='X'    ]"` for readability --
+  this was quietly affecting icon and display-name resolution too, not
+  just the scrap fixes above, now corrected across the board.
+- **272 quest rewards that offer a choice between several loot groups**
+  (e.g. `id="groupSchematics,groupBooks"`) were contributing zero items to
+  what counts as obtainable via Quest -- the code was treating the whole
+  comma-separated string as a single (nonexistent) group name instead of
+  checking each group in the list.
+- **The item detail page's acquisition chips (Recycle/Quest/Harvest/Craft/
+  Loot/Buy) now line up in the same fixed columns from row to row**,
+  instead of shifting left or right depending on which channels a given
+  item actually has.
+
+### Changed
+
+- **Workstations and Recycles Into headers now match their own section's
+  color** (the same green as workstation items, the same blue as the
+  Recycle chip) instead of both using the generic accent color.
+- **The clickable Recycle and Harvest chips are now solid-filled with
+  white text**, not just on hover, so a clickable chip reads as a small
+  button at a glance instead of looking identical to the five chips next
+  to it that aren't.
+- Build scripts now warn and fall back to a sane default instead of
+  crashing outright if a future mod update puts an unexpected value shape
+  (text instead of a number, for example) into a probability, count, or
+  vehicle-repair-damage field.
+
 ## [1.1.0] - 2026-09-15
 
 ### Added
