@@ -62,7 +62,17 @@
     </div>
     <div class="modal-body">
       <div class="tree-controls">
-        <label>Category: <select id="tree-category-select"></select></label>
+        <div class="icon-select-field">
+          <span class="icon-select-field-label">Category:</span>
+          <div class="icon-select" id="tree-category-select">
+            <button type="button" class="icon-select-btn" id="tree-category-btn" aria-haspopup="listbox" aria-expanded="false">
+              <span class="icon-select-btn-icon" id="tree-category-btn-icon"></span>
+              <span id="tree-category-btn-label"></span>
+              <span class="icon-select-caret" aria-hidden="true">&#9662;</span>
+            </button>
+            <div class="icon-select-menu" id="tree-category-menu" role="listbox" tabindex="-1" hidden></div>
+          </div>
+        </div>
         <div class="tree-legend">
           <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-1"></span>Tier 1</span>
           <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-2"></span>Tier 2</span>

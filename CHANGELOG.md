@@ -3,6 +3,29 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **Scraps Into**, on every item's detail page, showing what the
+  in-inventory "Scrap" action yields -- a different mechanic from the
+  Recycler's Recycles Into just below it. Not documented as its own table
+  anywhere in the mod's data; empirically reverse-engineered from
+  `Material`+`Weight` item properties and `materials.xml`'s
+  `forge_category`, then verified in-game (count is fixed at
+  `ceil(Weight / 10)`, independent of an item's quality/condition).
+
+### Changed
+
+- **Research Tree's category picker is now a hand-built icon dropdown**
+  instead of a native `<select>`, so each category shows its own research
+  symbol next to its name -- a native `<option>` can't render an icon in
+  any browser.
+- **README restructured** around a "Which setup do I need?" quick-picker
+  up top (zero-install vs. Python fallback, by browser) and a consolidated
+  "Privacy & security" section, rather than spreading that reasoning
+  across several setup steps.
+
 ## [1.0.4] - 2026-09-14
 
 ### Fixed

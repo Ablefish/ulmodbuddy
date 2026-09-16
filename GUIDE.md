@@ -53,8 +53,10 @@ A few things worth knowing about this page:
 
   ![7.92mm Round (HP)'s research section, showing one research step cascading from an earlier one, and its own recycle yield](docs/screenshots/item-detail-research-cascade.png)
 
-- **Recycles Into**, at the bottom, shows what you get back for breaking
-  a copy of the item down at a Recycler.
+- **Scraps Into**, followed by **Recycles Into**, cover the two separate
+  ways to break an item back down: Scraps Into is the in-inventory "Scrap"
+  action (always one fixed resource, no Recycler needed); Recycles Into is
+  what you get back for feeding a copy of the item through a Recycler.
 
 ### One-time totals
 

@@ -19,6 +19,7 @@ import re
 import sys
 import csv
 import json
+import math
 import shutil
 import datetime
 import xml.etree.ElementTree as ET
@@ -93,6 +94,7 @@ def configure_paths(install_root):
     global MOD_ITEM_MODIFIERS_FILE, BASE_ITEM_MODIFIERS_FILE
     global TRADERS_FILE, QUESTS_FILE, LOOT_CONTAINERS_FILE, LOOT_GROUP_FILES
     global RECYCLE_FILE
+    global MATERIALS_FILE, BASE_MATERIALS_FILE
     global VEHICLE_ITEMS_FILE
     global MOD_VEHICLES_FILE, BASE_VEHICLES_FILE
     global VEHICLE_BLOCKS_FILE, RECIPE_VEHICLES_FILE
@@ -152,6 +154,11 @@ def configure_paths(install_root):
         CONFIG / "Custom" / "loot_twitch.xml",
     ]
     RECYCLE_FILE = CONFIG / "Custom" / "recipes_recycler.xml"
+    # The in-inventory "Scrap" action (distinct from the Recycler block above)
+    # -- see load_scrap_data() for how Material+Weight on an item/block, plus
+    # this file's Material->forge_category, combine to derive it.
+    MATERIALS_FILE = CONFIG / "materials.xml"
+    BASE_MATERIALS_FILE = SRC / "Data" / "Config" / "materials.xml"
     # Vehicle stats (cargo capacity, repair kit tier, mod slots...) live in
     # their own <item>/<set> blocks here, entirely separate from the
     # recipe/research system -- see load_vehicles().
@@ -930,6 +937,148 @@ def load_recycle_data():
 
 
 # ---------------------------------------------------------------------------
+# Scrapping (in-inventory "Scrap" action) -- NOT the same mechanic as the
+# Recycler above, and not documented as its own table anywhere in the XML.
+# Empirically reverse-engineered by scrapping real items in-game and
+# comparing to their source data:
+#   - the OUTPUT type comes from the item/block's `Material` property,
+#     looked up in materials.xml for that material's `forge_category`:
+#       - if forge_category itself names a real item/block (true for
+#         weapon/tool/armor "Parts" items, e.g. Material MHandGunParts ->
+#         forge_category "gunHandgunT1PistolParts"), that IS the output;
+#       - otherwise forge_category is a bare category word (e.g. "iron",
+#         "wood") that resolves to a real item by naming convention:
+#         resourceScrap<Cap>, ulmResourceScrap<Cap>, or (six vanilla
+#         elements only) unit_<category>.
+#   - the COUNT is ceil(Weight / 10) -- confirmed independent of the
+#     item's quality/condition at scrap time (a damaged and a
+#     freshly-repaired copy of the same item yielded the same count).
+# `Weight` is NOT the same stat as `CarryWeight` (the one actually shown to
+# the player in-game) -- the two are unrelated in the overwhelming majority
+# of items that have both, so CarryWeight must never be substituted in.
+#
+# TODO: two forge_category buckets never resolve to a real item this way --
+# "plants" and "misc" (an unused "aluminum" bucket doesn't count -- nothing
+# in the current data uses it). Worth digging into further if it turns out
+# to matter for many items; left unresolved (no scrapsInto entry) for now.
+# ---------------------------------------------------------------------------
+def load_material_forge_categories():
+    """Returns {material_id: forge_category}, base game first, mod
+    overriding/adding on top (materials.xml has no Custom/materials_*.xml
+    split the way recipes/items do -- just the one file per side)."""
+    forge_categories = {}
+    for path in [BASE_MATERIALS_FILE, MATERIALS_FILE]:
+        if not path.exists():
+            continue
+        text = read_text(path)
+        for frag in scan_blocks(text, "material"):
+            el = parse_fragment(frag, path.name)
+            if el is None:
+                continue
+            mid = el.attrib.get("id")
+            if not mid:
+                continue
+            fc = None
+            for child in el:
+                if child.tag == "property" and child.attrib.get("name") == "forge_category":
+                    fc = child.attrib.get("value")
+            forge_categories[mid] = fc
+    return forge_categories
+
+
+def load_material_weight_props():
+    """Returns (props, all_ids): `props` is {name: (material, weight)} for
+    every <item>/<block> that directly carries BOTH a `Material` and a
+    `Weight` property (base game first, mod overriding); `all_ids` is every
+    <item>/<block> name seen at all, base or mod, regardless of whether it
+    has those properties -- needed to check whether a forge_category (or a
+    resourceScrap<Cap> guess) names a real thing."""
+    props = {}
+    all_ids = set()
+    files = (
+        [(BASE_ITEM_FILE, "item"), (BASE_BLOCK_FILE, "block")]
+        + [(p, "item") for p in ITEM_FILES]
+        + [(p, "block") for p in BLOCK_FILES]
+    )
+    for path, tag in files:
+        if not path.exists():
+            continue
+        text = read_text(path)
+        for frag in scan_blocks(text, tag):
+            el = parse_fragment(frag, path.name)
+            if el is None:
+                continue
+            name = el.attrib.get("name")
+            if not name:
+                continue
+            all_ids.add(name)
+            material = weight = None
+            for child in el:
+                if child.tag == "property":
+                    pname = child.attrib.get("name")
+                    if pname == "Material":
+                        material = child.attrib.get("value")
+                    elif pname == "Weight":
+                        weight = child.attrib.get("value")
+            if material and weight:
+                props[name] = (material, weight)
+    return props, all_ids
+
+
+def _resolve_material_weight(name, props, extends_map):
+    """Walks the Extends chain (same graph load_extends_graph() builds for
+    icon/name fallback) until it finds an ancestor that directly carries
+    both a Material and a Weight together -- most placeable containers
+    (e.g. a storage chest's pickup-helper item) inherit both from a parent
+    block rather than defining their own."""
+    seen = set()
+    cur = name
+    while cur and cur not in seen:
+        seen.add(cur)
+        if cur in props:
+            return props[cur]
+        cur = extends_map.get(cur)
+    return None, None
+
+
+def resolve_scrap_target(forge_category, all_ids):
+    if not forge_category:
+        return None
+    if forge_category in all_ids:
+        return forge_category
+    cap = forge_category[0].upper() + forge_category[1:]
+    for candidate in (f"resourceScrap{cap}", f"ulmResourceScrap{cap}", f"unit_{forge_category}"):
+        if candidate in all_ids:
+            return candidate
+    return None
+
+
+def load_scrap_data(all_names, extends_map):
+    """Returns scrap_yields: {name: {"name": output_name, "count": N}},
+    scoped to `all_names` (the same "does the app ever show this" set icons
+    are resolved for) since there's no value computing this for names the
+    app never displays a detail page for."""
+    forge_categories = load_material_forge_categories()
+    props, all_ids = load_material_weight_props()
+    scrap_yields = {}
+    for nm in all_names:
+        material, weight = _resolve_material_weight(nm, props, extends_map)
+        if not material or not weight:
+            continue
+        target = resolve_scrap_target(forge_categories.get(material), all_ids)
+        if not target:
+            continue
+        try:
+            count = math.ceil(float(weight) / 10)
+        except ValueError:
+            continue
+        if count < 1:
+            count = 1
+        scrap_yields[nm] = {"name": target, "count": count}
+    return scrap_yields
+
+
+# ---------------------------------------------------------------------------
 # Vehicles -- <item>/<set xpath="...item[@name='X']"> in items_vehicles.xml
 # ---------------------------------------------------------------------------
 # Vehicle stats live entirely outside the recipe/research/acquisition
@@ -1505,9 +1654,21 @@ def _variant_candidates(name, variant_helper_candidates):
     candidates are tried first since they're a stronger signal."""
     candidates = list(variant_helper_candidates.get(name, []))
     if name.endswith(VARIANT_HELPER_SUFFIX):
-        guess = name[: -len(VARIANT_HELPER_SUFFIX)]
+        # "<X>Shapes:VariantHelper" (wood/steel/titanium/... generic building
+        # shapes) uses a colon before the suffix, unlike every other
+        # VariantHelper name -- strip that too, or the guess below comes out
+        # as "titaniumShapes:" instead of "titaniumShapes".
+        guess = name[: -len(VARIANT_HELPER_SUFFIX)].rstrip(":")
         if guess and guess not in candidates:
             candidates.append(guess)
+        # That whole "Shapes" family has no icon under its own name OR the
+        # bare guess above -- the mod ships a specific representative
+        # shape's icon instead, named "<X>ShapesCube" (e.g.
+        # titaniumShapesCube.png), for exactly this family. Harmless to try
+        # for other VariantHelper names too; it just won't match anything.
+        cube_guess = f"{guess}Cube"
+        if guess and cube_guess not in candidates:
+            candidates.append(cube_guess)
     return candidates
 
 
@@ -1692,6 +1853,20 @@ def main(install_root):
 
     print("Backfilling display names via Extends chain...")
     extends_map, children_map = load_extends_graph()
+
+    print("Loading scrap data (Material/Weight -> in-inventory Scrap output)...")
+    scrap_yields = load_scrap_data(all_names, extends_map)
+    print(f"  {len(scrap_yields)} scrappable name(s) resolved")
+    # Fold scrap output targets into all_names BEFORE icon resolution below --
+    # otherwise a target only ever reachable via scrapYields (e.g. a "Parts"
+    # item no live recipe references as an ingredient anymore, like
+    # meleeWpnClubT3SteelClubParts once Undead Legacy's own recipe stopped
+    # using it) would never even be attempted, despite a real base-game icon
+    # existing for it. Mirrors how recycle_yields' outputs are folded in above.
+    for source_name, y in scrap_yields.items():
+        all_names.add(source_name)
+        all_names.add(y["name"])
+
     name_fallback_used = []
     for nm in all_names:
         if nm not in names:
@@ -1817,6 +1992,7 @@ def main(install_root):
                 "recyclable": len(recyclable),
                 "recycleYieldItems": len(recycle_yields),
                 "recycleSourceRows": sum(len(v) for v in recycle_sources.values()),
+                "scrapYieldItems": len(scrap_yields),
                 "itemMods": len(item_mods),
                 "vehicles": len(vehicles),
                 "vehicleRepairRecipes": sum(len(t) for t in vehicle_repairs.values()),
@@ -1831,6 +2007,7 @@ def main(install_root):
         "harvestSources": harvest_sources,
         "recycleYields": recycle_yields,
         "recycleSources": recycle_sources,
+        "scrapYields": scrap_yields,
         "itemMods": sorted(item_mods),
         "vehicles": vehicles,
         "vehicleColorVariants": vehicle_color_variants,

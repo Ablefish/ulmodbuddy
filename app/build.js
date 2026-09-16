@@ -190,6 +190,8 @@ window.ULModBuddyBuilder = (function () {
         ref("Mods/UndeadLegacy/Config/Custom/loot_twitch.xml", await tryGetFile(custom, "loot_twitch.xml")),
       ],
       recycleFile: ref("Mods/UndeadLegacy/Config/Custom/recipes_recycler.xml", await tryGetFile(custom, "recipes_recycler.xml")),
+      materialsFile: ref("Mods/UndeadLegacy/Config/materials.xml", await tryGetFile(config, "materials.xml")),
+      baseMaterialsFile: ref("Data/Config/materials.xml", await tryGetFile(dataConfig, "materials.xml")),
       vehicleItemsFile: ref("Mods/UndeadLegacy/Config/Custom/items_vehicles.xml", await tryGetFile(custom, "items_vehicles.xml")),
       modVehiclesFile: ref("Mods/UndeadLegacy/Config/vehicles.xml", await tryGetFile(config, "vehicles.xml")),
       baseVehiclesFile: ref("Data/Config/vehicles.xml", await tryGetFile(dataConfig, "vehicles.xml")),
@@ -803,6 +805,105 @@ window.ULModBuddyBuilder = (function () {
   }
 
   // -------------------------------------------------------------------
+  // Scrapping (in-inventory "Scrap" action) -- a direct port of build.py's
+  // load_scrap_data(); see its comment for the full empirically-derived
+  // writeup of how this differs from the Recycler above (Material/Weight
+  // driven, not its own table). Deliberately restricted to plain <item>/
+  // <block> elements only (unlike this file's icon/Extends resolution,
+  // which also reads <set>/<append> xpath patches) so both build paths
+  // resolve the exact same set of scrappable names from the same install.
+  // -------------------------------------------------------------------
+  async function loadMaterialForgeCategories(paths) {
+    const forgeCategories = {};
+    for (const fileRef of [paths.baseMaterialsFile, paths.materialsFile]) {
+      if (!fileRef.handle) continue;
+      const doc = await readAndParse(fileRef);
+      if (!doc) continue;
+      for (const el of scanBlocks(doc, "material")) {
+        const mid = attr(el, "id");
+        if (!mid) continue;
+        let fc = null;
+        for (const prop of directChildren(el, "property")) {
+          if (attr(prop, "name") === "forge_category") fc = attr(prop, "value");
+        }
+        forgeCategories[mid] = fc;
+      }
+    }
+    return forgeCategories;
+  }
+
+  async function loadMaterialWeightProps(paths) {
+    const props = {};
+    const allIds = new Set();
+    const files = [
+      { fileRef: paths.baseItemFile, tag: "item" },
+      { fileRef: paths.baseBlockFile, tag: "block" },
+      ...paths.itemFiles.map((fileRef) => ({ fileRef, tag: "item" })),
+      ...paths.blockFiles.map((fileRef) => ({ fileRef, tag: "block" })),
+    ];
+    for (const { fileRef, tag } of files) {
+      if (!fileRef.handle) continue;
+      const doc = await readAndParse(fileRef);
+      if (!doc) continue;
+      for (const el of scanBlocks(doc, tag)) {
+        const name = attr(el, "name");
+        if (!name) continue;
+        allIds.add(name);
+        let material = null;
+        let weight = null;
+        for (const prop of directChildren(el, "property")) {
+          const pname = attr(prop, "name");
+          if (pname === "Material") material = attr(prop, "value");
+          else if (pname === "Weight") weight = attr(prop, "value");
+        }
+        if (material && weight) props[name] = [material, weight];
+      }
+    }
+    return { props, allIds };
+  }
+
+  // Walks the Extends chain until an ancestor carries BOTH Material and
+  // Weight together -- most placeable containers (e.g. a storage chest's
+  // pickup-helper item) inherit both from a parent block rather than
+  // defining their own.
+  function resolveMaterialWeight(name, props, extendsMap) {
+    const seen = new Set();
+    let cur = name;
+    while (cur && !seen.has(cur)) {
+      seen.add(cur);
+      if (props[cur]) return props[cur];
+      cur = extendsMap[cur];
+    }
+    return [null, null];
+  }
+
+  function resolveScrapTarget(forgeCategory, allIds) {
+    if (!forgeCategory) return null;
+    if (allIds.has(forgeCategory)) return forgeCategory;
+    const cap = forgeCategory[0].toUpperCase() + forgeCategory.slice(1);
+    for (const candidate of [`resourceScrap${cap}`, `ulmResourceScrap${cap}`, `unit_${forgeCategory}`]) {
+      if (allIds.has(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  async function loadScrapData(paths, allNames, extendsMap) {
+    const forgeCategories = await loadMaterialForgeCategories(paths);
+    const { props, allIds } = await loadMaterialWeightProps(paths);
+    const scrapYields = {};
+    for (const nm of allNames) {
+      const [material, weight] = resolveMaterialWeight(nm, props, extendsMap);
+      if (!material || !weight) continue;
+      const target = resolveScrapTarget(forgeCategories[material], allIds);
+      if (!target) continue;
+      const count = Math.ceil(parseFloat(weight) / 10);
+      if (!Number.isFinite(count)) continue;
+      scrapYields[nm] = { name: target, count: Math.max(1, count) };
+    }
+    return scrapYields;
+  }
+
+  // -------------------------------------------------------------------
   // Vehicles -- <item>/<set xpath="...item[@name='X']"> in items_vehicles.xml
   // -------------------------------------------------------------------
   const VEHICLE_STAT_FIELDS = [
@@ -1190,8 +1291,19 @@ window.ULModBuddyBuilder = (function () {
   function variantCandidates(name, variantHelperCandidates) {
     const candidates = [...(variantHelperCandidates[name] || [])];
     if (name.endsWith(VARIANT_HELPER_SUFFIX)) {
-      const guess = name.slice(0, -VARIANT_HELPER_SUFFIX.length);
+      // "<X>Shapes:VariantHelper" (wood/steel/titanium/... generic building
+      // shapes) uses a colon before the suffix, unlike every other
+      // VariantHelper name -- strip that too, or the guess below comes out
+      // as "titaniumShapes:" instead of "titaniumShapes".
+      const guess = name.slice(0, -VARIANT_HELPER_SUFFIX.length).replace(/:$/, "");
       if (guess && !candidates.includes(guess)) candidates.push(guess);
+      // That whole "Shapes" family has no icon under its own name OR the
+      // bare guess above -- the mod ships a specific representative
+      // shape's icon instead, named "<X>ShapesCube" (e.g.
+      // titaniumShapesCube.png), for exactly this family. Harmless to try
+      // for other VariantHelper names too; it just won't match anything.
+      const cubeGuess = `${guess}Cube`;
+      if (guess && !candidates.includes(cubeGuess)) candidates.push(cubeGuess);
     }
     return candidates;
   }
@@ -1357,6 +1469,19 @@ window.ULModBuddyBuilder = (function () {
 
     log("Backfilling display names via Extends chain...");
     const { extendsMap, childrenMap } = await loadExtendsGraph(paths);
+
+    log("Loading scrap data (Material/Weight -> in-inventory Scrap output)...");
+    const scrapYields = await loadScrapData(paths, allNames, extendsMap);
+    log(`  ${Object.keys(scrapYields).length} scrappable name(s) resolved`);
+    // Fold scrap output targets into allNames BEFORE icon resolution below --
+    // see build.py's load_scrap_data() call for why (a target like a "Parts"
+    // item can be reachable only via scrapYields, with a real base-game icon
+    // that would otherwise never be attempted).
+    for (const sourceName in scrapYields) {
+      allNames.add(sourceName);
+      allNames.add(scrapYields[sourceName].name);
+    }
+
     const nameFallbackUsed = [];
     for (const nm of allNames) {
       if (!(nm in names)) {
@@ -1466,6 +1591,7 @@ window.ULModBuddyBuilder = (function () {
           recyclable: recyclable.size,
           recycleYieldItems: Object.keys(recycleYields).length,
           recycleSourceRows: Object.values(recycleSources).reduce((s, v) => s + v.length, 0),
+          scrapYieldItems: Object.keys(scrapYields).length,
           itemMods: itemMods.size,
           vehicles: Object.keys(vehicles).length,
           vehicleRepairRecipes: Object.values(vehicleRepairs).reduce((s, t) => s + t.length, 0),
@@ -1481,6 +1607,7 @@ window.ULModBuddyBuilder = (function () {
       harvestSources,
       recycleYields,
       recycleSources,
+      scrapYields,
       itemMods: [...itemMods].sort(),
       vehicles,
       vehicleColorVariants,

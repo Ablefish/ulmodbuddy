@@ -37,7 +37,10 @@ window.ULModBuddyApp = (function () {
   const treeBtnEl = $("#tree-btn");
   const treeModalEl = $("#tree-modal");
   const treeModalCloseEl = $("#tree-modal-close");
-  const treeCategorySelectEl = $("#tree-category-select");
+  const treeCategoryBtnEl = $("#tree-category-btn");
+  const treeCategoryBtnIconEl = $("#tree-category-btn-icon");
+  const treeCategoryBtnLabelEl = $("#tree-category-btn-label");
+  const treeCategoryMenuEl = $("#tree-category-menu");
   const treeCanvasWrapEl = $("#tree-canvas-wrap");
   const treeCanvasInnerEl = $("#tree-canvas-inner");
   const treeZoomInEl = $("#tree-zoom-in");
@@ -159,6 +162,8 @@ window.ULModBuddyApp = (function () {
     ...Object.keys(data.harvestSources || {}),
     ...Object.keys(data.recycleYields || {}),
     ...Object.keys(data.recycleSources || {}),
+    ...Object.keys(data.scrapYields || {}),
+    ...Object.values(data.scrapYields || {}).map((s) => s.name),
     // Weapon/armor mods (item_modifiers.xml) -- some have no acquisition
     // channel this app tracks at all, so without their own explicit list
     // they'd be invisible even though they're real, ownable things (e.g.
@@ -660,21 +665,64 @@ window.ULModBuddyApp = (function () {
     fitTreeView();
   }
 
+  // Category picker -- a hand-built dropdown, not a native <select>, since
+  // this is the one picker in the app where showing each choice's icon
+  // actually matters (a bare category name reads far slower than its
+  // familiar research-tree symbol). See .icon-select in styles.css.
+  // Category roots are research nodes, so their icon should follow the same
+  // "tree symbol first" preference as everywhere else research is shown
+  // (see iconForResearch) -- not the plain ingredient-icon lookup.
+  function treeCategoryIconHtml(root) {
+    const icon = iconForResearch(root);
+    return icon
+      ? `<img class="icon-select-option-icon" src="${icon}" alt="">`
+      : `<span class="icon-select-option-icon icon-select-option-icon-placeholder"></span>`;
+  }
+
+  function closeTreeCategoryMenu() {
+    treeCategoryMenuEl.hidden = true;
+    treeCategoryBtnEl.setAttribute("aria-expanded", "false");
+  }
+
+  function openTreeCategoryMenu() {
+    treeCategoryMenuEl.hidden = false;
+    treeCategoryBtnEl.setAttribute("aria-expanded", "true");
+    const current = treeCategoryMenuEl.querySelector('[aria-selected="true"]');
+    (current || treeCategoryMenuEl.firstElementChild)?.focus();
+  }
+
   function selectTreeCategory(root) {
     treeState.root = root;
-    treeCategorySelectEl.value = root;
+    treeCategoryBtnIconEl.innerHTML = treeCategoryIconHtml(root);
+    treeCategoryBtnLabelEl.textContent = `${displayName(root)} (${researchTreeGroups.get(root).length})`;
+    for (const opt of treeCategoryMenuEl.children) {
+      opt.setAttribute("aria-selected", String(opt.dataset.root === root));
+    }
     renderTreeCanvas();
   }
 
   function hideTreeModal() {
     treeModalEl.hidden = true;
+    closeTreeCategoryMenu();
   }
 
   function openTreeModal() {
-    if (!treeCategorySelectEl.options.length) {
-      treeCategorySelectEl.innerHTML = researchCategories
-        .map((root) => `<option value="${root}">${displayName(root)} (${researchTreeGroups.get(root).length})</option>`)
+    if (!treeCategoryMenuEl.children.length) {
+      treeCategoryMenuEl.innerHTML = researchCategories
+        .map(
+          (root) =>
+            `<button type="button" class="icon-select-option" role="option" data-root="${root}">` +
+            `${treeCategoryIconHtml(root)}` +
+            `<span>${displayName(root)} (${researchTreeGroups.get(root).length})</span></button>`
+        )
         .join("");
+      for (const opt of treeCategoryMenuEl.children) {
+        opt.addEventListener("click", () => {
+          selectTreeCategory(opt.dataset.root);
+          closeTreeCategoryMenu();
+          treeCategoryBtnEl.focus();
+        });
+      }
     }
     // Shown before selecting/fitting -- fitTreeView() needs the wrap's real
     // (non-zero) on-screen size, which a `hidden` element doesn't have.
@@ -688,7 +736,19 @@ window.ULModBuddyApp = (function () {
   treeModalEl.addEventListener("click", (e) => {
     if (e.target === treeModalEl) hideTreeModal();
   });
-  treeCategorySelectEl.addEventListener("change", () => selectTreeCategory(treeCategorySelectEl.value));
+  treeCategoryBtnEl.addEventListener("click", () => {
+    if (treeCategoryMenuEl.hidden) openTreeCategoryMenu();
+    else closeTreeCategoryMenu();
+  });
+  document.addEventListener("click", (e) => {
+    if (!treeCategoryMenuEl.hidden && !e.target.closest("#tree-category-select")) closeTreeCategoryMenu();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !treeCategoryMenuEl.hidden) {
+      closeTreeCategoryMenu();
+      treeCategoryBtnEl.focus();
+    }
+  });
 
   treeZoomInEl.addEventListener("click", () => {
     const rect = treeCanvasWrapEl.getBoundingClientRect();
@@ -1588,6 +1648,21 @@ window.ULModBuddyApp = (function () {
     return html;
   }
 
+  // Straight from data.scrapYields (build.py's load_scrap_data) -- like
+  // Recycles Into, a flat terminal fact rather than a toggleable tree, but
+  // simpler: the in-inventory Scrap action always yields exactly one
+  // resource type at one fixed count (derived from the item's own Weight
+  // property), never a range or multiple outputs the way the Recycler is.
+  function renderScrapYieldCard(name) {
+    const scrap = data.scrapYields && data.scrapYields[name];
+    let html = `<div class="variant-card">`;
+    html += scrap
+      ? `<ul class="ingredient-list"><li>${reportRowIcon(scrap.name)}<span class="ing-count">${scrap.count}&times;</span>${jumpSpan(scrap.name, displayName(scrap.name))}</li></ul>`
+      : `<div class="req-flag-dim">Not scrappable.</div>`;
+    html += `</div>`;
+    return html;
+  }
+
   // One-Time Totals lives in the left nav now, below the results list,
   // rather than at the bottom of the report -- it's a running summary you
   // want visible while you're browsing/expanding, not something to scroll
@@ -1717,10 +1792,17 @@ window.ULModBuddyApp = (function () {
       html += renderToolsCard(report);
     }
 
-    // A research node isn't itself a recyclable item -- it just happens to
-    // share its internal name with the item/recipe it unlocks, which is
-    // where any recycleYields entry for that name actually belongs.
+    // A research node isn't itself a scrappable/recyclable item -- it just
+    // happens to share its internal name with the item/recipe it unlocks,
+    // which is where any scrapYields/recycleYields entry for that name
+    // actually belongs. Scraps Into shown above Recycles Into: in practice
+    // very few names have both (the two mechanics apply to different kinds
+    // of items -- gear you scrap in your inventory vs. materials fed
+    // through the Recycler block).
     if (kind !== "research") {
+      html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Scraps Into</div>`;
+      html += renderScrapYieldCard(name);
+
       const recycleOutputs = data.recycleYields && data.recycleYields[name];
       html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Recycles Into${recycleOutputs ? ` (${recycleOutputs.length})` : ""}</div>`;
       html += renderRecycleYieldsCard(name);

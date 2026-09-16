@@ -3,10 +3,6 @@
 New here? See the **[User Guide](GUIDE.md)** for a walkthrough of what it
 can do, with screenshots.
 
-Only tested on desktop, with Chrome or Edge. A local Python fallback is
-available if you have Python installed and want to use a different
-browser -- see below.
-
 A browsable recipe/research/workstation reference for the [Undead Legacy](http://ul.subquake.com)
 mod for *7 Days to Die*. Search for any craftable item, research topic, or
 workstation, and see its full "Total Requirements Report" -- a cascading,
@@ -17,19 +13,18 @@ or recycling.
 This is an unofficial fan-made tool. It is not affiliated with The Fun
 Pimps, Subquake, or the Undead Legacy team.
 
-## No mod content is bundled
+## Which setup do I need?
 
-This repository contains only the tool itself. **No game files, mod files,
-or extracted images are included or ever committed.** You grant the app
-access to your own, legally-owned *7 Days to Die* install (with Undead
-Legacy installed as a mod), and it builds a dataset directly from those
-files on your own machine. Nothing is ever uploaded anywhere.
+The app needs to read your own *7 Days to Die* + Undead Legacy install to
+build its data -- there's no bundled copy of the mod (see
+[Privacy & security](#privacy--security) below). How you point it at that
+install depends on your browser:
 
-With the zero-install setup, this all happens in your browser and mod files
-and icons are referenced directly from your install folder -- nothing is
-copied. With the Python fallback, icons are copied into a local `app/icons`
-folder so your browser can display them; this stays on your machine, is
-never committed (see `.gitignore`), and is never sent anywhere.
+- **Using Chrome or Edge?** Use **[zero-install setup](#setup-zero-install----chrome-or-edge)** --
+  no download, no Python, just a link.
+- **Using Firefox, Safari, or Brave?** Use the **[Python fallback](#setup-fallback----firefox-safari-brave-without-the-flag-or-local-python)** --
+  a few extra steps, but only needs Python (already installed on most
+  systems).
 
 ## Setup (zero install -- Chrome or Edge)
 
@@ -54,12 +49,11 @@ instantly without repeating this. If you update the mod yourself later,
 click **Rebuild data** in the header to regenerate against your updated
 install.
 
-This flow relies on the File System Access API. Chrome and Edge support it
-out of the box; Firefox and Safari currently don't. **Brave** ships the same
-engine as Chrome but disables this API by default -- enable it at
-`brave://flags/#file-system-access-api` and relaunch the browser, or just
-use Chrome/Edge instead. If none of that works for you, use the Python
-fallback below.
+Chrome and Edge support this out of the box; Firefox and Safari currently
+don't. **Brave** ships the same engine as Chrome but disables it by
+default -- enable it at `brave://flags/#file-system-access-api` and
+relaunch the browser, or just use Chrome/Edge instead. If none of that
+works for you, use the Python fallback below.
 
 ## Setup (fallback -- Firefox, Safari, Brave without the flag, or local Python)
 
@@ -75,16 +69,34 @@ described above.
 3. Open <http://localhost:8420> in your browser.
 4. The app will ask for your install folder the first time -- paste the
    path and click **Build**. This reads your local install and generates
-   `app/data.js` plus the icons the app needs; it takes a few seconds.
+   the data plus icons the app needs; it takes a few seconds.
 
 That's it -- the app takes over once the build finishes. If you update
 the mod yourself later, click **Rebuild data** in the header to
 regenerate against your updated install.
 
+## Privacy & security
+
+- **No mod content is bundled.** This repository contains only the tool
+  itself -- no game files, mod files, or extracted images are included or
+  ever committed. You grant the app read access to your own, legally-owned
+  install, and everything is built from those files on your own machine.
+- **Nothing is ever uploaded anywhere.** The zero-install flow runs
+  entirely in your browser; the Python fallback runs entirely on
+  `localhost`. Neither one talks to any server other than the one serving
+  the app's own static files.
+- **Access is read-only and explicitly granted.** In the zero-install flow,
+  your browser shows a permission prompt before the app can read your
+  install folder, and the tool never writes to it. The Python fallback
+  copies icon files into a local `app/icons` folder so your own browser can
+  display them -- that folder stays on your machine, is never committed
+  (see `.gitignore`), and is never sent anywhere.
+
 ## Notes
 
+- Only tested on desktop, with Chrome or Edge; the Python fallback is
+  needed for other browsers -- see above.
 - Every warning about the mod's own data (unresolved references, likely
   typos, missing localization) is visible in-app via the "N build
   warning(s)" link in the header, not just in a terminal.
-- The tool never modifies your game install -- it only reads from it.
 - See [CHANGELOG.md](CHANGELOG.md) for release history.
