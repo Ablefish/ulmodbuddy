@@ -411,6 +411,26 @@ img.icon-ring-workstation {
   min-width: 100px;
 }
 
+/* A research node's own facts (Category/Parent/...) next to what it
+   unlocks -- two independent lists side by side rather than one long
+   stack, since neither reads as a continuation of the other. Wraps to a
+   single column on a narrow viewport. */
+.variant-card-columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.variant-card-col {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.variant-card-col:not(:first-child) {
+  border-left: 1px solid var(--border);
+  padding-left: 20px;
+}
+
 .vehicle-compare-wrap {
   overflow-x: auto;
   margin-bottom: 14px;
@@ -837,7 +857,10 @@ img.icon-ring-workstation {
   left: 0;
   z-index: 20;
   min-width: 100%;
-  max-height: 320px;
+  /* Tall enough for all 12 of the mod's current categories (~368px) with
+     room to spare -- overflow-y stays on as a fallback if a future mod
+     update adds more, rather than hard-capping the list at today's count. */
+  max-height: 400px;
   overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -984,6 +1007,36 @@ img.icon-ring-workstation {
 
 .tree-node {
   cursor: pointer;
+}
+
+/* Hover popup listing what a node unlocks -- position: fixed and placed
+   entirely via JS (showTreeNodeTooltip), since it needs to track a node's
+   real on-screen position under the canvas's own pan/zoom transform. */
+.tree-node-tooltip {
+  position: fixed;
+  z-index: 30;
+  max-width: 260px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 8px 10px;
+  pointer-events: none;
+}
+
+.tree-node-tooltip-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 14px;
+}
+
+/* Bigger than the usual 18px .ing-icon -- a hover popup is meant to read
+   at a glance. */
+.tree-node-tooltip-icon {
+  width: 30px;
+  height: 30px;
 }
 
 .tree-node circle {

@@ -46,6 +46,7 @@ window.ULModBuddyApp = (function () {
   const treeZoomInEl = $("#tree-zoom-in");
   const treeZoomOutEl = $("#tree-zoom-out");
   const treeZoomResetEl = $("#tree-zoom-reset");
+  const treeNodeTooltipEl = $("#tree-node-tooltip");
 
   // ---------------------------------------------------------------------
   // Meta line
@@ -452,6 +453,19 @@ window.ULModBuddyApp = (function () {
     return root;
   }
 
+  // Only each tree's root node carries its own `category` in the mod's data
+  // (e.g. "Mechanic" on Novice Mechanic) -- every descendant's own field is
+  // empty, so fall back to the root's via the same parent walk above. Shared
+  // by the research detail page and the Research Tree category picker so
+  // both show the same resolved value rather than the picker using the
+  // root's display NAME ("Novice Mechanic") while the detail page uses its
+  // CATEGORY ("Mechanic").
+  function researchCategoryOf(name) {
+    const node = data.research[name];
+    if (!node) return null;
+    return node.category || (data.research[researchRootOf(name)] || {}).category || null;
+  }
+
   const researchTreeGroups = new Map(); // root -> [research node, ...] (all tiers combined)
   for (const [name, node] of Object.entries(data.research)) {
     if (!node.pos) continue; // no coordinate to plot -- can't appear on any canvas
@@ -459,8 +473,12 @@ window.ULModBuddyApp = (function () {
     if (!researchTreeGroups.has(root)) researchTreeGroups.set(root, []);
     researchTreeGroups.get(root).push(node);
   }
+  // Sorted by the same resolved category text the picker displays (falling
+  // back to the root's own display name, same as researchCategoryOf's own
+  // fallback), not the root's display name -- otherwise the dropdown's
+  // order wouldn't match what it's showing.
   const researchCategories = [...researchTreeGroups.keys()].sort((a, b) =>
-    displayName(a).localeCompare(displayName(b))
+    (researchCategoryOf(a) || displayName(a)).localeCompare(researchCategoryOf(b) || displayName(b))
   );
 
   function tierOf(area) {
@@ -658,6 +676,7 @@ window.ULModBuddyApp = (function () {
   }
 
   function renderTreeCanvas() {
+    hideTreeNodeTooltip();
     treeCanvasInnerEl.innerHTML = renderResearchTreeSvg(treeState.root);
     const svg = treeCanvasInnerEl.querySelector("svg");
     treeNaturalWidth = svg ? parseFloat(svg.getAttribute("width")) || 0 : 0;
@@ -694,7 +713,7 @@ window.ULModBuddyApp = (function () {
   function selectTreeCategory(root) {
     treeState.root = root;
     treeCategoryBtnIconEl.innerHTML = treeCategoryIconHtml(root);
-    treeCategoryBtnLabelEl.textContent = `${displayName(root)} (${researchTreeGroups.get(root).length})`;
+    treeCategoryBtnLabelEl.textContent = `${researchCategoryOf(root) || displayName(root)} (${researchTreeGroups.get(root).length})`;
     for (const opt of treeCategoryMenuEl.children) {
       opt.setAttribute("aria-selected", String(opt.dataset.root === root));
     }
@@ -704,6 +723,7 @@ window.ULModBuddyApp = (function () {
   function hideTreeModal() {
     treeModalEl.hidden = true;
     closeTreeCategoryMenu();
+    hideTreeNodeTooltip();
   }
 
   function openTreeModal() {
@@ -713,7 +733,7 @@ window.ULModBuddyApp = (function () {
           (root) =>
             `<button type="button" class="icon-select-option" role="option" data-root="${root}">` +
             `${treeCategoryIconHtml(root)}` +
-            `<span>${displayName(root)} (${researchTreeGroups.get(root).length})</span></button>`
+            `<span>${researchCategoryOf(root) || displayName(root)} (${researchTreeGroups.get(root).length})</span></button>`
         )
         .join("");
       for (const opt of treeCategoryMenuEl.children) {
@@ -801,6 +821,7 @@ window.ULModBuddyApp = (function () {
     // buttons, since the browser would then fire their "click" at
     // tree-canvas-wrap instead of the button itself.
     if (e.target.closest(".tree-zoom-controls")) return;
+    hideTreeNodeTooltip();
     treePointerDownNode = e.target.closest(".tree-node");
     treeDragging = true;
     treeDragMoved = false;
@@ -835,6 +856,56 @@ window.ULModBuddyApp = (function () {
   treeCanvasWrapEl.addEventListener("pointercancel", () => {
     treeDragging = false;
     treeCanvasWrapEl.classList.remove("tree-dragging");
+  });
+
+  // Hover popup listing what a node unlocks -- every node gets one (not
+  // just multi-unlock hubs), reusing the same researchUnlockedRecipeNames()
+  // the detail page's own Unlocks list is built from, so both agree. A
+  // node with nothing to show (the rare pure-hub case) just never displays
+  // one rather than popping up an empty box.
+  function hideTreeNodeTooltip() {
+    treeNodeTooltipEl.hidden = true;
+  }
+
+  function showTreeNodeTooltip(nodeEl) {
+    const node = data.research[nodeEl.dataset.name];
+    const unlockedRecipes = node ? researchUnlockedRecipeNames(node) : [];
+    if (!unlockedRecipes.length) {
+      hideTreeNodeTooltip();
+      return;
+    }
+    // Larger than the usual .ing-icon rows this same markup pattern uses
+    // elsewhere (e.g. Unlocks on the research detail page) -- a hover
+    // popup is glanced at for a moment, not read closely, so the icons
+    // need to read at a glance too.
+    treeNodeTooltipEl.innerHTML = unlockedRecipes
+      .map((n) => `<div class="tree-node-tooltip-item">${reportRowIcon(n, "tree-node-tooltip-icon")}<span>${displayName(n)}</span></div>`)
+      .join("");
+    treeNodeTooltipEl.hidden = false;
+    // Positioned in viewport coordinates (position: fixed), centered above
+    // the node and flipped below when there's no room, clamped to the
+    // canvas wrap's own bounds -- getBoundingClientRect() already accounts
+    // for the pan/zoom transform on tree-canvas-inner, so no separate
+    // unproject-from-SVG-space math is needed here.
+    const nodeRect = nodeEl.getBoundingClientRect();
+    const wrapRect = treeCanvasWrapEl.getBoundingClientRect();
+    const ttRect = treeNodeTooltipEl.getBoundingClientRect();
+    let left = nodeRect.left + nodeRect.width / 2 - ttRect.width / 2;
+    let top = nodeRect.top - ttRect.height - 10;
+    if (top < wrapRect.top) top = nodeRect.bottom + 10;
+    left = Math.max(wrapRect.left + 4, Math.min(left, wrapRect.right - ttRect.width - 4));
+    treeNodeTooltipEl.style.left = `${left}px`;
+    treeNodeTooltipEl.style.top = `${top}px`;
+  }
+
+  treeCanvasWrapEl.addEventListener("mouseover", (e) => {
+    if (treeDragging) return;
+    const nodeEl = e.target.closest(".tree-node");
+    if (nodeEl) showTreeNodeTooltip(nodeEl);
+  });
+  treeCanvasWrapEl.addEventListener("mouseout", (e) => {
+    const nodeEl = e.target.closest(".tree-node");
+    if (nodeEl && !nodeEl.contains(e.relatedTarget)) hideTreeNodeTooltip();
   });
 
   document.addEventListener("keydown", (e) => {
@@ -1059,6 +1130,24 @@ window.ULModBuddyApp = (function () {
     if (wrap) wrap.innerHTML = vehicleCompareTableHtml();
   };
 
+  // What a research node unlocks, in reverse of how reportEngine's own
+  // findResearchFor() resolves a RECIPE's unlock.via: most nodes (457 of
+  // 589) have no <unlocks> children at all and unlock a same-named recipe
+  // purely by that name match, while the rest name it explicitly via
+  // <unlocks>. Either way, the real signal is "does a recipe with this name
+  // exist" -- an <unlocks> child just as often names a workstation tier or a
+  // plain resource/book with no recipe of its own (data.recipesByName won't
+  // have those), which is why no separate check of the child's own
+  // craftable/display_only flags is needed here.
+  function researchUnlockedRecipeNames(node) {
+    const names = new Set();
+    if (data.recipesByName[node.name]) names.add(node.name);
+    for (const u of node.unlocks || []) {
+      if (u.name && data.recipesByName[u.name]) names.add(u.name);
+    }
+    return [...names];
+  }
+
   // The item's own facts, shown at the top of its Total Requirements page:
   // browsing an item and sizing up its cost are the same task, not two
   // pages linked by a button. Doesn't repeat the recipe's own Ingredients
@@ -1073,11 +1162,23 @@ window.ULModBuddyApp = (function () {
     // isn't worth the redundancy.
     if (kind === "research") {
       const node = data.research[name];
-      html += `<div class="variant-card">`;
-      html += `<div class="kv-row"><span class="k">Category</span><span>${node.category || "-"}</span></div>`;
+      const unlockedRecipes = researchUnlockedRecipeNames(node);
+      const category = researchCategoryOf(name);
+      html += `<div class="variant-card variant-card-columns">`;
+      html += `<div class="variant-card-col">`;
+      html += `<div class="kv-row"><span class="k">Category</span><span>${category || "-"}</span></div>`;
       html += `<div class="kv-row"><span class="k">Parent</span><span>${node.parent ? displayName(node.parent) : "(root)"}</span></div>`;
       html += `<div class="kv-row"><span class="k">Unlocked by default</span><span>${node.unlocked ? "yes" : "no"}</span></div>`;
       if (node.requires) html += `<div class="kv-row"><span class="k">Requires</span><span>${displayName(node.requires)}</span></div>`;
+      html += `</div>`;
+      html += `<div class="variant-card-col">`;
+      html += `<div class="kv-row"><span class="k">Unlocks</span><span>${unlockedRecipes.length} recipe${unlockedRecipes.length === 1 ? "" : "s"}</span></div>`;
+      if (unlockedRecipes.length) {
+        html += `<ul class="ingredient-list">`;
+        html += unlockedRecipes.map((n) => `<li>${reportRowIcon(n)}${jumpSpan(n, displayName(n))}</li>`).join("");
+        html += `</ul>`;
+      }
+      html += `</div>`;
       html += `</div>`;
     } else if (kind === "workstation") {
       const info = tierInfo[name];

@@ -4,14 +4,27 @@ New here? See the **[User Guide](GUIDE.md)** for a walkthrough of what it
 can do, with screenshots.
 
 A browsable recipe/research/workstation reference for the [Undead Legacy](http://ul.subquake.com)
-mod for *7 Days to Die*. Search for any craftable item, research topic, or
-workstation, and see its full "Total Requirements Report" -- a cascading,
-click-to-expand cost tree covering crafting ingredients, research
-prerequisites, workstations, tools, and where to find things via harvesting
-or recycling.
+mod for *7 Days to Die*, built directly from your own install:
+
+- **Full crafting cost breakdown** -- search any item, research topic, or
+  workstation and expand a cascading, click-to-expand cost tree all the way
+  down to raw materials: ingredients, research prerequisites, workstations,
+  tools, and every way to acquire each one (Craft / Loot / Buy / Harvest /
+  Recycle / Quest).
+- **Scraps Into** and **Recycles Into** -- what breaking an item down gives
+  back, in your inventory or at a Recycler.
+- **Harvest** and **Recycle Sources** -- every source for a given item,
+  ranked by expected yield.
+- **Research Tree** -- a visual map of each research category; hover a
+  node to see what it unlocks.
+- **Vehicles** -- per-vehicle stats, tiered repair costs, and a sortable
+  comparison table across all of them.
+- **Build warnings** -- gaps or oddities in the mod's own data (typos,
+  missing localization, unresolved references) surfaced in-app, not
+  buried in a terminal log.
 
 This is an unofficial fan-made tool. It is not affiliated with The Fun
-Pimps, Subquake, or the Undead Legacy team.
+Pimps or Subquake.
 
 ## Which setup do I need?
 

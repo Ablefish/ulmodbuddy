@@ -96,7 +96,7 @@ you need to conduct that specific research (see the legend at the top);
 it's not related to the tier of whatever workstation the unlocked recipe
 itself needs to craft with.
 
-![Research Tree for the "Basic Weapons" category, showing tier-colored ring icons and zoom controls](docs/screenshots/research-tree.png)
+![Research Tree for the "Cooking" category, showing tier-colored ring icons, the category dropdown, and a hover popup listing what Spaghetti unlocks](docs/screenshots/research-tree.png)
 
 Getting around a tree bigger than the window:
 
@@ -106,6 +106,9 @@ Getting around a tree bigger than the window:
 - The **−** / **+** buttons in the corner zoom in fixed steps, centered
   on the middle of the view; **Fit** snaps back to the default
   zoomed-out overview of the whole category.
+- **Hovering a node** pops up what it unlocks -- Spaghetti's own node,
+  shown above, unlocks just the one recipe; some research nodes unlock
+  several at once.
 - **Clicking a node** jumps straight to that item/research's own detail
   page, same as clicking it in the search results.
 

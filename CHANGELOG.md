@@ -3,7 +3,7 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.1.0] - 2026-09-15
 
 ### Added
 
@@ -14,17 +14,41 @@ follows [Keep a Changelog](https://keepachangelog.com/).
   `Material`+`Weight` item properties and `materials.xml`'s
   `forge_category`, then verified in-game (count is fixed at
   `ceil(Weight / 10)`, independent of an item's quality/condition).
+- **A research page's info box now lists every recipe it unlocks**, next
+  to its existing Category/Parent/Requires facts -- covering both a
+  same-named recipe (the common case) and any recipe named explicitly via
+  the research node's own `<unlocks>` entries.
+- **Hovering a Research Tree node pops up what it unlocks**, icons shown
+  larger than usual so they read at a glance -- every node gets one, not
+  just multi-unlock hubs, reusing the same resolved Unlocks list as the
+  research detail page.
 
 ### Changed
 
 - **Research Tree's category picker is now a hand-built icon dropdown**
   instead of a native `<select>`, so each category shows its own research
   symbol next to its name -- a native `<option>` can't render an icon in
-  any browser.
-- **README restructured** around a "Which setup do I need?" quick-picker
+  any browser. Tall enough to show all of the mod's current categories at
+  once, no scrollbar needed.
+- **A research node's Category now inherits from its tree's root** when
+  the node's own field is empty, which is true for all but the 12 actual
+  root nodes -- previously every non-root node just showed "-". Shown
+  consistently in both the research detail page's info box (now laid out
+  in two columns, facts on the left and Unlocks on the right) and the
+  Research Tree's category picker, which now labels and sorts by this
+  same resolved category rather than the root node's own display name.
+- **README restructured**: opens with a bulleted feature list instead of
+  one dense paragraph (the crafting cost tree is one feature among several
+  now, not the whole pitch), adds a "Which setup do I need?" quick-picker
   up top (zero-install vs. Python fallback, by browser) and a consolidated
-  "Privacy & security" section, rather than spreading that reasoning
-  across several setup steps.
+  "Privacy & security" section rather than spreading that reasoning across
+  several setup steps, and drops the "Undead Legacy team" affiliation
+  disclaimer -- Subquake *is* the Undead Legacy team, so it read as
+  disclaiming an affiliation with itself.
+- **GUIDE.md's Research Tree screenshot retaken** to show the current UI
+  (the icon dropdown, a resolved category, and a hover popup) instead of
+  the plain `<select>` it predated; the surrounding text now covers
+  hovering a node too.
 
 ## [1.0.4] - 2026-09-14
 
