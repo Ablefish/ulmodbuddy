@@ -62,7 +62,11 @@
     </div>
     <div class="modal-body">
       <div class="tree-controls">
-        <div class="icon-select-field">
+        <div class="tree-mode-toggle" id="tree-mode-toggle" role="group" aria-label="Research tree view">
+          <button type="button" class="tree-mode-btn" id="tree-mode-category" aria-pressed="true">By category</button>
+          <button type="button" class="tree-mode-btn" id="tree-mode-workstation" aria-pressed="false">By workstation</button>
+        </div>
+        <div class="icon-select-field" id="tree-category-field">
           <span class="icon-select-field-label">Category:</span>
           <div class="icon-select" id="tree-category-select">
             <button type="button" class="icon-select-btn" id="tree-category-btn" aria-haspopup="listbox" aria-expanded="false">
@@ -73,12 +77,13 @@
             <div class="icon-select-menu" id="tree-category-menu" role="listbox" tabindex="-1" hidden></div>
           </div>
         </div>
-        <div class="tree-legend">
+        <div class="tree-legend" id="tree-tier-legend">
           <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-1"></span>Tier 1</span>
           <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-2"></span>Tier 2</span>
           <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-3"></span>Tier 3</span>
           <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-unlocked"></span>Unlocked by default</span>
         </div>
+        <div class="tree-legend" id="tree-workstation-legend" hidden></div>
       </div>
       <div id="tree-canvas-wrap" class="tree-canvas-wrap">
         <div id="tree-canvas-inner" class="tree-canvas-inner"></div>

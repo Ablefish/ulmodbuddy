@@ -41,6 +41,11 @@ window.ULModBuddyApp = (function () {
   const treeCategoryBtnIconEl = $("#tree-category-btn-icon");
   const treeCategoryBtnLabelEl = $("#tree-category-btn-label");
   const treeCategoryMenuEl = $("#tree-category-menu");
+  const treeCategoryFieldEl = $("#tree-category-field");
+  const treeModeCategoryBtnEl = $("#tree-mode-category");
+  const treeModeWorkstationBtnEl = $("#tree-mode-workstation");
+  const treeTierLegendEl = $("#tree-tier-legend");
+  const treeWorkstationLegendEl = $("#tree-workstation-legend");
   const treeCanvasWrapEl = $("#tree-canvas-wrap");
   const treeCanvasInnerEl = $("#tree-canvas-inner");
   const treeZoomInEl = $("#tree-zoom-in");
@@ -142,6 +147,12 @@ window.ULModBuddyApp = (function () {
       stationFamilyNames.add(t);
     });
   });
+  // Single-tier stations (campfire, stove, cementMixer) never appear in
+  // data.upgrades at all -- no tierInfo entry, same as any other block name
+  // that happens not to be part of a real upgrade chain (see
+  // renderWorkstationTreeSvg, which treats both cases identically: no tier
+  // to place them by).
+  const alwaysAvailableStations = new Set(data.alwaysAvailableStations || []);
 
   // Tier 1's raw localized name is plain ("Carpenter's Table"); later tiers
   // already read "Carpenter's Table (Tier 2)" in the mod's own Localization
@@ -598,7 +609,331 @@ window.ULModBuddyApp = (function () {
     );
   }
 
-  const treeState = { root: null };
+  // ---------------------------------------------------------------------
+  // Research tree, by workstation -- a second lens on the same 589 nodes.
+  // renderResearchTreeSvg groups by category and shows the RESEARCH bench
+  // tier (node.area, always ulmStationResearch_*) as a ring color. This
+  // groups by the CRAFTING workstation each node's own unlock actually
+  // needs instead -- a materially different axis, since every category's
+  // nodes are conducted at the same one Research Table but craft at many
+  // different stations. Tier becomes real columns; category is kept as
+  // each node's own fill color, which is what makes it visible that a
+  // workstation's row is never just one category's worth of nodes.
+  //
+  // A workstation with no tier variants at all (no entry in data.upgrades)
+  // -- Backpack, Campfire, and a handful of single-tier stations like the
+  // Kiln -- gets one row spanning every column instead of living in one,
+  // since there's no tier to place it by.
+  // ---------------------------------------------------------------------
+
+  // A node can unlock recipe variants needing different areas (e.g. a
+  // resource craftable by hand OR faster at a powered station) -- prefers
+  // no station, then an always-available one, then the lowest tier of a
+  // real family, so placement favors the cheapest path rather than an
+  // arbitrary one.
+  function primaryAreaFor(areas) {
+    if (areas.has(null)) return null;
+    for (const a of areas) {
+      if (alwaysAvailableStations.has(a)) return a;
+    }
+    let best = null;
+    for (const a of areas) {
+      const info = tierInfo[a];
+      if (info && (!best || info.tierIndex < tierInfo[best].tierIndex)) best = a;
+    }
+    return best || areas.values().next().value;
+  }
+
+  function workstationRowKeyFor(area) {
+    if (area === null) return { key: "__backpack__", label: "Backpack", tiered: false };
+    if (tierInfo[area]) {
+      const root = tierInfo[area].familyTiers[0];
+      return { key: root, label: displayName(root), tiered: true };
+    }
+    // Always-available (campfire/stove/cementMixer) and any other block
+    // that simply never appears in data.upgrades are the same case here:
+    // no tier axis, so no column to put it in.
+    return { key: area, label: displayName(area), tiered: false };
+  }
+
+  // Resolves every research node with something craftable to a
+  // {rowKey, col} pair, then buckets them into rows. A node with nothing
+  // craftable at all (7 of 589 -- a pure hub) has nowhere to go and is
+  // skipped entirely.
+  function buildWorkstationTreeData() {
+    const resolved = new Map();
+    for (const name of Object.keys(data.research)) {
+      const node = data.research[name];
+      const recipeNames = researchUnlockedRecipeNames(node);
+      if (!recipeNames.length) continue;
+      const areas = new Set();
+      for (const rn of recipeNames) {
+        for (const rid of data.recipesByName[rn]) areas.add(data.recipes[rid].area || null);
+      }
+      const area = primaryAreaFor(areas);
+      const rowInfo = workstationRowKeyFor(area);
+      const col = rowInfo.tiered ? tierInfo[area].tierIndex : 0;
+      resolved.set(name, { rowKey: rowInfo.key, rowLabel: rowInfo.label, tiered: rowInfo.tiered, col });
+    }
+    const rows = new Map();
+    for (const [name, info] of resolved) {
+      if (!rows.has(info.rowKey)) rows.set(info.rowKey, { label: info.rowLabel, tiered: info.tiered, cells: new Map() });
+      const cells = rows.get(info.rowKey).cells;
+      if (!cells.has(info.col)) cells.set(info.col, []);
+      cells.get(info.col).push(name);
+    }
+    return { resolved, rows };
+  }
+
+  const WT_NODE_SPACING_X = 24;
+
+  // Lays out one cell's worth of research nodes: an edge only exists
+  // between a parent and child that resolved to this exact same cell (see
+  // buildWorkstationTreeData) -- everything else becomes its own
+  // disconnected local root, positioned by a simple bottom-up pass (a leaf
+  // gets the next free lane, a parent centers over its own children) that
+  // guarantees no two branches in this cell ever cross. Positions are
+  // relative to this cell's own x=0 -- centering into its column happens
+  // separately once every cell's width is known (see renderWorkstationTreeSvg).
+  function layoutWorkstationCell(names, resolved) {
+    const n = names.length;
+    if (!n) return { maxDepth: -1, minX: 0, maxX: 0, items: [] };
+    const indexOf = new Map(names.map((nm, i) => [nm, i]));
+    const parentIdx = names.map((nm) => {
+      const p = data.research[nm].parent;
+      if (!p || !indexOf.has(p)) return null;
+      const pInfo = resolved.get(p);
+      const nInfo = resolved.get(nm);
+      if (!pInfo || !nInfo || pInfo.rowKey !== nInfo.rowKey || pInfo.col !== nInfo.col) return null;
+      return indexOf.get(p);
+    });
+    const children = names.map(() => []);
+    parentIdx.forEach((p, i) => {
+      if (p !== null) children[p].push(i);
+    });
+    const depth = new Array(n).fill(-1);
+    function depthOf(i) {
+      if (depth[i] !== -1) return depth[i];
+      depth[i] = parentIdx[i] === null ? 0 : depthOf(parentIdx[i]) + 1;
+      return depth[i];
+    }
+    for (let i = 0; i < n; i++) depthOf(i);
+    let nextSlot = 0;
+    const x = new Array(n);
+    function visit(i) {
+      const kids = children[i];
+      if (!kids.length) {
+        x[i] = nextSlot * WT_NODE_SPACING_X;
+        nextSlot++;
+        return x[i];
+      }
+      let sum = 0;
+      kids.forEach((c) => (sum += visit(c)));
+      x[i] = sum / kids.length;
+      return x[i];
+    }
+    for (let i = 0; i < n; i++) if (parentIdx[i] === null) visit(i);
+    const items = names.map((nm, i) => ({ name: nm, x: x[i], depth: depth[i], parent: parentIdx[i] }));
+    return { maxDepth: Math.max(...depth), minX: Math.min(...x), maxX: Math.max(...x), items };
+  }
+
+  // 12 visually distinct colors (the standard palette's mid-ramp stops)
+  // assigned to categories in the same sorted order the category picker
+  // uses -- stable regardless of how the mod's category count changes,
+  // cycling if it ever exceeds 12.
+  const WT_CATEGORY_PALETTE = [
+    "#7F77DD", "#1D9E75", "#D85A30", "#D4537E", "#BA7517", "#378ADD",
+    "#639922", "#E24B4A", "#534AB7", "#0F6E56", "#993C1D", "#993556",
+  ];
+  let wtCategoryColorMap = null;
+  function workstationCategoryColorMap() {
+    if (!wtCategoryColorMap) {
+      wtCategoryColorMap = new Map();
+      researchCategories.forEach((root, i) => {
+        const label = researchCategoryOf(root) || displayName(root);
+        wtCategoryColorMap.set(label, WT_CATEGORY_PALETTE[i % WT_CATEGORY_PALETTE.length]);
+      });
+    }
+    return wtCategoryColorMap;
+  }
+  function workstationNodeColor(name) {
+    const label = researchCategoryOf(name);
+    return (label && workstationCategoryColorMap().get(label)) || "var(--text-dim)";
+  }
+
+  function workstationCategoryLegendHtml() {
+    const map = workstationCategoryColorMap();
+    return [...map.entries()]
+      .map(
+        ([label, color]) =>
+          `<span class="tree-legend-item"><span class="tree-legend-swatch" style="border-color:${color};background:${color}"></span>${label}</span>`
+      )
+      .join("");
+  }
+
+  const WT_LEFT_MARGIN = 220;
+  const WT_TOP_PAD = 24;
+  const WT_NODE_SPACING_Y = 34;
+  const WT_ROW_PAD = 16;
+  const WT_ROW_GAP = 16;
+  const WT_HEADER_H = 34;
+  const WT_SECTION_GAP = 40;
+  const WT_ROW_ICON = 22;
+  const WT_COL_ICON = 16;
+  const WT_MIN_COL_WIDTH = 140;
+  const WT_CELL_PAD = 50;
+
+  function renderWorkstationTreeSvg() {
+    const { resolved, rows } = buildWorkstationTreeData();
+    const totalCount = (row) => [...row.cells.values()].reduce((s, arr) => s + arr.length, 0);
+
+    const spanRows = [];
+    const tieredRows = [];
+    for (const [key, row] of rows) {
+      const cellLayouts = new Map();
+      for (const [col, names] of row.cells) cellLayouts.set(col, layoutWorkstationCell(names, resolved));
+      const entry = { key, label: row.label, tiered: row.tiered, cellLayouts, count: totalCount(row) };
+      (row.tiered ? tieredRows : spanRows).push(entry);
+    }
+    spanRows.sort((a, b) => b.count - a.count);
+    tieredRows.sort((a, b) => b.count - a.count);
+
+    const maxTierCols = tieredRows.reduce(
+      (m, row) => Math.max(m, ...[...row.cellLayouts.keys()].map((c) => c + 1)),
+      1
+    );
+
+    let colContentWidth = 0;
+    tieredRows.forEach((row) => {
+      row.cellLayouts.forEach((cl) => {
+        colContentWidth = Math.max(colContentWidth, cl.maxX - cl.minX);
+      });
+    });
+    let spanContentWidth = 0;
+    spanRows.forEach((row) => {
+      row.cellLayouts.forEach((cl) => {
+        spanContentWidth = Math.max(spanContentWidth, cl.maxX - cl.minX);
+      });
+    });
+    const colWidth = Math.max(WT_MIN_COL_WIDTH, colContentWidth + WT_CELL_PAD);
+    const usableWidth = Math.max(colWidth * maxTierCols, spanContentWidth + WT_CELL_PAD);
+    const colCenters = Array.from({ length: maxTierCols }, (_, i) => WT_LEFT_MARGIN + colWidth * (i + 0.5));
+    const spanCenter = WT_LEFT_MARGIN + usableWidth / 2;
+    const totalWidth = WT_LEFT_MARGIN + usableWidth + 40;
+
+    function place(row, centers) {
+      let maxDepth = -1;
+      const placedCells = new Map();
+      row.cellLayouts.forEach((cl, col) => {
+        maxDepth = Math.max(maxDepth, cl.maxDepth);
+        const offset = centers[col] - (cl.minX + cl.maxX) / 2;
+        placedCells.set(
+          col,
+          cl.items.map((it) => ({ ...it, x: it.x + offset }))
+        );
+      });
+      const height = (maxDepth + 1) * WT_NODE_SPACING_Y + WT_ROW_PAD * 2;
+      return { ...row, placedCells, height };
+    }
+    const placedSpanRows = spanRows.map((row) => place(row, { 0: spanCenter }));
+    const placedTieredRows = tieredRows.map((row) => place(row, colCenters));
+
+    let edgesHtml = "";
+    let nodesHtml = "";
+    let headersHtml = "";
+    let dividersHtml = "";
+    let rowLabelsHtml = "";
+    let bgHtml = "";
+
+    let cursorY = WT_TOP_PAD;
+    const sections = [
+      { mode: "single", header: "no tier", rows: placedSpanRows },
+      { mode: "columns", header: null, rows: placedTieredRows },
+    ].filter((s) => s.rows.length);
+
+    sections.forEach((section, si) => {
+      const sectionTop = cursorY;
+      const contentHeight = section.rows.reduce((s, r) => s + r.height, 0) + WT_ROW_GAP * Math.max(0, section.rows.length - 1);
+      const sectionHeight = WT_HEADER_H + contentHeight;
+
+      if (si === 0) {
+        bgHtml += `<rect class="wtree-section-bg" x="${WT_LEFT_MARGIN - 16}" y="${sectionTop}" width="${usableWidth + 32}" height="${sectionHeight}"/>`;
+      }
+
+      if (section.mode === "single") {
+        headersHtml += `<text class="wtree-header" x="${spanCenter}" y="${sectionTop + WT_HEADER_H - 12}" text-anchor="middle">${section.header}</text>`;
+      } else {
+        colCenters.forEach((cx, i) => {
+          headersHtml += `<text class="wtree-header" x="${cx}" y="${sectionTop + WT_HEADER_H - 12}" text-anchor="middle">tier ${i + 1}</text>`;
+        });
+      }
+
+      let rowY = sectionTop + WT_HEADER_H;
+      section.rows.forEach((row) => {
+        if (section.mode === "columns") {
+          for (let i = 1; i < maxTierCols; i++) {
+            const x = WT_LEFT_MARGIN + colWidth * i;
+            dividersHtml += `<line class="wtree-divider" x1="${x}" y1="${rowY}" x2="${x}" y2="${rowY + row.height}"/>`;
+          }
+        }
+
+        const rowIcon = row.key === "__backpack__" ? null : iconFor(row.key);
+        const labelY = rowY + row.height / 2;
+        rowLabelsHtml += `<g class="wtree-row-label" transform="translate(${WT_LEFT_MARGIN - 28},${labelY})">`;
+        if (rowIcon) {
+          rowLabelsHtml += `<image href="${rowIcon}" x="${-WT_ROW_ICON - 6}" y="${-WT_ROW_ICON / 2}" width="${WT_ROW_ICON}" height="${WT_ROW_ICON}"/>`;
+        }
+        rowLabelsHtml += `<text x="0" y="4" text-anchor="end">${row.label}</text></g>`;
+
+        if (section.mode === "columns" && row.tiered) {
+          const familyTiers = tierInfo[row.key].familyTiers;
+          row.placedCells.forEach((items, col) => {
+            const tierBlock = familyTiers[col];
+            const icon = tierBlock ? iconFor(tierBlock) : null;
+            if (icon) {
+              const cx = colCenters[col];
+              nodesHtml += `<image class="wtree-col-icon" href="${icon}" x="${cx - WT_COL_ICON / 2}" y="${rowY + 2}" width="${WT_COL_ICON}" height="${WT_COL_ICON}"/>`;
+            }
+          });
+        }
+
+        row.placedCells.forEach((items) => {
+          items.forEach((it) => {
+            it.cy = rowY + WT_ROW_PAD + it.depth * WT_NODE_SPACING_Y + (section.mode === "columns" ? 20 : 6);
+          });
+          items.forEach((it) => {
+            if (it.parent === null) return;
+            const parentItem = items[it.parent];
+            edgesHtml += `<line class="wtree-edge" x1="${parentItem.x.toFixed(1)}" y1="${parentItem.cy.toFixed(1)}" x2="${it.x.toFixed(1)}" y2="${it.cy.toFixed(1)}" stroke="${workstationNodeColor(it.name)}"/>`;
+          });
+          items.forEach((it) => {
+            const r = it.parent === null ? 7 : 5;
+            nodesHtml +=
+              `<g class="tree-node wtree-node" data-name="${it.name}" transform="translate(${it.x.toFixed(1)},${it.cy.toFixed(1)})">` +
+              `<circle r="${r}" fill="${workstationNodeColor(it.name)}"/></g>`;
+          });
+        });
+
+        rowY += row.height + WT_ROW_GAP;
+      });
+
+      cursorY = sectionTop + sectionHeight;
+      if (si < sections.length - 1) {
+        const dividerY = cursorY + WT_SECTION_GAP / 2;
+        dividersHtml += `<line class="wtree-section-divider" x1="${WT_LEFT_MARGIN - 16}" y1="${dividerY}" x2="${WT_LEFT_MARGIN + usableWidth + 16}" y2="${dividerY}"/>`;
+        cursorY += WT_SECTION_GAP;
+      }
+    });
+
+    const totalHeight = cursorY + 20;
+    return (
+      `<svg class="tree-svg" viewBox="0 0 ${totalWidth} ${totalHeight}" width="${totalWidth}" height="${totalHeight}">` +
+      bgHtml + dividersHtml + headersHtml + rowLabelsHtml +
+      `<g class="tree-edges">${edgesHtml}</g><g class="tree-nodes">${nodesHtml}</g></svg>`
+    );
+  }
+
+  const treeState = { root: null, mode: "category" };
   // Pan/zoom is plain CSS transform on tree-canvas-inner, driven entirely
   // from here -- .tree-canvas-wrap has no native scrollbars (overflow:
   // hidden) so this is the only way to navigate a tree bigger than the
@@ -677,11 +1012,32 @@ window.ULModBuddyApp = (function () {
 
   function renderTreeCanvas() {
     hideTreeNodeTooltip();
-    treeCanvasInnerEl.innerHTML = renderResearchTreeSvg(treeState.root);
+    treeCanvasInnerEl.innerHTML =
+      treeState.mode === "workstation" ? renderWorkstationTreeSvg() : renderResearchTreeSvg(treeState.root);
     const svg = treeCanvasInnerEl.querySelector("svg");
     treeNaturalWidth = svg ? parseFloat(svg.getAttribute("width")) || 0 : 0;
     treeNaturalHeight = svg ? parseFloat(svg.getAttribute("height")) || 0 : 0;
     fitTreeView();
+  }
+
+  // Two independent lenses on the same 589 research nodes: by category
+  // (renderResearchTreeSvg, tier shown as a ring color) or by the crafting
+  // workstation each node's own unlock actually requires
+  // (renderWorkstationTreeSvg, tier shown as a real column) -- see that
+  // function for why these are genuinely different groupings, not just a
+  // different picker over the same tree. Only one is ever wired up.
+  function setTreeMode(mode) {
+    if (treeState.mode === mode) return;
+    treeState.mode = mode;
+    treeModeCategoryBtnEl.setAttribute("aria-pressed", String(mode === "category"));
+    treeModeWorkstationBtnEl.setAttribute("aria-pressed", String(mode === "workstation"));
+    treeCategoryFieldEl.hidden = mode !== "category";
+    treeTierLegendEl.hidden = mode !== "category";
+    treeWorkstationLegendEl.hidden = mode !== "workstation";
+    if (mode === "workstation" && !treeWorkstationLegendEl.children.length) {
+      treeWorkstationLegendEl.innerHTML = workstationCategoryLegendHtml();
+    }
+    renderTreeCanvas();
   }
 
   // Category picker -- a hand-built dropdown, not a native <select>, since
@@ -747,9 +1103,13 @@ window.ULModBuddyApp = (function () {
     // Shown before selecting/fitting -- fitTreeView() needs the wrap's real
     // (non-zero) on-screen size, which a `hidden` element doesn't have.
     treeModalEl.hidden = false;
-    if (!treeState.root) selectTreeCategory(researchCategories[0]);
+    if (treeState.mode === "workstation") renderTreeCanvas();
+    else if (!treeState.root) selectTreeCategory(researchCategories[0]);
     else fitTreeView();
   }
+
+  treeModeCategoryBtnEl.addEventListener("click", () => setTreeMode("category"));
+  treeModeWorkstationBtnEl.addEventListener("click", () => setTreeMode("workstation"));
 
   treeBtnEl.addEventListener("click", openTreeModal);
   treeModalCloseEl.addEventListener("click", hideTreeModal);

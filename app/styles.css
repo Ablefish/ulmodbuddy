@@ -817,10 +817,39 @@ img.icon-ring-workstation {
   margin-bottom: 12px;
 }
 
+.tree-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.tree-mode-btn {
+  background: var(--panel-alt);
+  border: none;
+  color: var(--text-dim);
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tree-mode-btn + .tree-mode-btn {
+  border-left: 1px solid var(--border);
+}
+.tree-mode-btn:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+.tree-mode-btn[aria-pressed="true"] {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
 .icon-select-field {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.icon-select-field[hidden] {
+  display: none;
 }
 
 .icon-select-field-label {
@@ -934,6 +963,9 @@ img.icon-ring-workstation {
   flex-wrap: wrap;
   font-size: 12px;
   color: var(--text-dim);
+}
+.tree-legend[hidden] {
+  display: none;
 }
 
 .tree-legend-item {
@@ -1094,6 +1126,45 @@ img.icon-ring-workstation {
 
 .tree-node:hover text {
   fill: var(--text);
+}
+
+/* Research tree, by workstation -- node fill/edge stroke are set inline
+   per element (see renderWorkstationTreeSvg's workstationNodeColor), so
+   these rules deliberately never set fill/stroke themselves other than
+   the hover ring, which needs to win regardless of a node's own color. */
+.wtree-node circle {
+  stroke: none;
+}
+.wtree-node:hover circle {
+  stroke: var(--text);
+  stroke-width: 2;
+}
+.wtree-edge {
+  fill: none;
+  stroke-width: 1;
+}
+.wtree-section-bg {
+  fill: var(--panel-alt);
+}
+.wtree-divider {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 4 6;
+}
+.wtree-section-divider {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.wtree-header {
+  fill: var(--text-dim);
+  font-size: 20px;
+}
+.wtree-row-label text {
+  fill: var(--text);
+  font-size: 20px;
+}
+.wtree-col-icon {
+  opacity: 0.85;
 }
 
 /* High/medium/low is relative to the best source for THIS item (see
