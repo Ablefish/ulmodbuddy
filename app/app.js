@@ -430,6 +430,178 @@ window.ULModBuddyApp = (function () {
     showSourceModal(`Recycle Sources — ${displayName(name)}`, sources, "item");
   };
 
+  // Loot Sources -- a different shape from Harvest/Recycle above (no
+  // count, no tier bucket): one row per lootcontainer this item is
+  // reachable from, each with the block(s)/killed entity(ies) that
+  // actually lead there, plus its full GATE CHAIN (see build.js's
+  // loadLootSources/flattenLootGroup comments) -- structural reachability,
+  // not verified odds. A stage-dependent gate is a named curve over loot
+  // stage (Custom/loot_templates.xml, shipped as data.lootProbTemplates),
+  // so unlike Harvest/Recycle this one IS interactive: the stage buttons
+  // re-render the same rows against a different point on those curves, a
+  // handful of array lookups multiplied together, not a rebuild.
+  //
+  // Why a CHAIN and not one number: a whole weapon tier is routinely
+  // gated by a loot_prob_template on the REFERENCE to its group (e.g.
+  // groupRanged's own <item group="groupRangedT1"
+  // loot_prob_template="ProbT1"/>), not on the weapon itself -- the AK-47's
+  // own <item> line carries no gate at all. Showing only a leaf's own line
+  // (an earlier version of this feature did) made every weapon read as
+  // unconditionally "guaranteed" regardless of loot stage, which is wrong
+  // -- at loot stage 0 the real answer is "you cannot get this," because
+  // ProbT1 is 0% below stage 10. Each gate in the chain is modeled as an
+  // independent access check, multiplied together for the combined chance.
+  // NOT round numbers -- the actual loot stage where the next weapon/tool/
+  // armor tier switches on. Every tier's gate curve (ProbT0-ProbT3 for
+  // weapons/tools, the near-identical Tier1-Tier5 for armor/headgear) is
+  // exactly 0% below its own onset stage, then turns on -- e.g. ProbT1
+  // (the AK-47's own tier) is 0% below stage 10, not some smooth ramp from
+  // 0. Checked directly against Custom/loot_templates.xml's own bins:
+  // T0/Tier1 always on, T1/Tier2 @10, T2/Tier3 @49, T3/Tier4 @89, Tier5
+  // (armor's extra top tier) @129 -- the exact bin boundaries, not rounded,
+  // so every button lands right on a real transition instead of a stage or
+  // two into it. An arbitrary 0/50/100/150/200 split landed close to some
+  // of these by chance but missed stage 10 entirely -- "can't get this at
+  // all" to "now possible" is the single most dramatic jump on the whole
+  // curve, and a round-number picker skipped right over it.
+  const LOOT_STAGE_TIERS = [0, 10, 49, 89, 129];
+  // Same tier KEYS and section styling as SOURCE_TIER_SECTIONS (Harvest/
+  // Recycle) -- "Chance" instead of "Yield" in the label, since this is
+  // about how likely a source is, not how much it gives.
+  const LOOT_TIER_SECTIONS = [
+    { tier: "high", label: "High Chance" },
+    { tier: "medium", label: "Medium Chance" },
+    { tier: "low", label: "Low Chance" },
+  ];
+
+  // Clamps to the nearest defined bin rather than failing outside a
+  // template's own authored range -- several flat templates (e.g. "high")
+  // only bother defining "level=1,999999", leaving stage 0 technically
+  // undefined even though the template obviously doesn't vary by stage in
+  // any range that matters. Only a genuinely malformed/missing template
+  // (not shipped in data.lootProbTemplates at all) returns null.
+  function lootProbAtStage(templateName, stage) {
+    const bins = data.lootProbTemplates && data.lootProbTemplates[templateName];
+    if (!bins || !bins.length) return null;
+    const hit = bins.find(([lo, hi]) => stage >= lo && stage <= hi);
+    if (hit) return hit[2];
+    const sorted = bins.slice().sort((a, b) => a[0] - b[0]);
+    return stage < sorted[0][0] ? sorted[0][2] : sorted[sorted.length - 1][2];
+  }
+
+  // Multiplies every gate's resolved value at `stage` -- see this
+  // section's header comment for why a chain of independent checks, not a
+  // single number, is the right model here.
+  function lootCombinedChanceAtStage(gates, stage) {
+    let combined = 1;
+    for (const [prob, template] of gates) {
+      if (template) {
+        const p = lootProbAtStage(template, stage);
+        if (p === null) return null;
+        combined *= p;
+      } else {
+        combined *= prob;
+      }
+    }
+    return combined;
+  }
+
+  // null = "no gate at all" (unconditional) reads as 1; an unresolvable
+  // template lookup reads as null (kept distinct from a real, computed 0).
+  function lootChanceAtStage(row, stage) {
+    return row.gates.length ? lootCombinedChanceAtStage(row.gates, stage) : 1;
+  }
+
+  // High/Medium/Low, exactly like Harvest/Recycle Sources' own tiering
+  // (see sortAndTierSources in build.js) -- same thresholds, relative to
+  // the best source for the SAME item, so a lone 2% source still reads as
+  // "High" when nothing better exists. The one difference from Harvest/
+  // Recycle: this has to be computed here, live, per stage button click,
+  // rather than baked in at build time, since "best" depends on which
+  // loot stage is selected.
+  function lootTierFor(p, best) {
+    if (best <= 0) return "low";
+    const ratio = p / best;
+    return ratio >= 0.5 ? "high" : ratio >= 0.15 ? "medium" : "low";
+  }
+
+  // Dedupes by DISPLAY name, not internal name -- e.g. Elliannia's Stash
+  // is authored as two internal block names (a secure/insecure pair) that
+  // read identically to a player, so showing it twice under the same
+  // heading is noise, not two different places to look. Returns
+  // [internalName, label] pairs, first-seen internal name wins per label.
+  function lootDedupedNames(names) {
+    const seen = new Set();
+    const out = [];
+    for (const n of names) {
+      const label = displayName(n);
+      if (seen.has(label)) continue;
+      seen.add(label);
+      out.push([n, label]);
+    }
+    return out;
+  }
+
+  function lootNameListHtml(pairs) {
+    if (!pairs.length) return "";
+    return `<ul class="ingredient-list loot-flat-list">${pairs
+      .map(([n, label]) => `<li>${reportRowIcon(n)}<span>${label}</span></li>`)
+      .join("")}</ul>`;
+  }
+
+  function lootSourcesModalHtml(name, stage) {
+    const rows = (data.lootSources && data.lootSources[name]) || [];
+    // A row this item's own gate chain rules out entirely at this stage
+    // (e.g. an AK-47 below loot stage 10 -- its tier's own gate is a flat
+    // 0%) is dropped, not shown at all: it isn't a real source at this
+    // stage, and listing dead rows just to say so is noise, not help.
+    // Filtered on the ROUNDED percent, not the raw float -- a chance small
+    // enough to still display as 0% is just as much dead-row noise as an
+    // exact 0.
+    const withChance = rows
+      .map((r) => [r, lootChanceAtStage(r, stage)])
+      .filter(([, p]) => p === null || Math.round(p * 100) > 0);
+
+    const stageBar =
+      `<div class="loot-stage-bar">Loot stage: ` +
+      LOOT_STAGE_TIERS.map(
+        (s) =>
+          `<button type="button" class="loot-stage-btn${s === stage ? " loot-stage-btn-active" : ""}" ` +
+          `onclick="window.__cookbookShowLoot('${name.replace(/'/g, "\\'")}', ${s})">${s}</button>`
+      ).join("") +
+      `</div>`;
+
+    if (!withChance.length) {
+      return stageBar + `<div class="loot-empty-note">Not obtainable from any known source at loot stage ${stage}.</div>`;
+    }
+
+    const best = Math.max(...withChance.map(([, p]) => p ?? 0));
+    const tiered = withChance.map(([r, p]) => [r, p === null ? "low" : lootTierFor(p, best)]);
+
+    // Flattened per tier -- across every container that landed in this
+    // tier, one shared "Found In" list and one shared "Dropped By" list,
+    // rather than repeating those headings once per container. A
+    // container's own identity was never the point; where to look and
+    // what to kill are.
+    const body = LOOT_TIER_SECTIONS.map(({ tier, label }) => {
+      const inTier = tiered.filter(([, t]) => t === tier).map(([r]) => r);
+      if (!inTier.length) return "";
+      const blocks = lootDedupedNames(inTier.flatMap((r) => r.blocks));
+      const killedBy = lootDedupedNames(inTier.flatMap((r) => r.killedBy));
+      let html = `<div class="section-label source-tier-label source-tier-label-${tier}">${label} (${blocks.length + killedBy.length})</div>`;
+      if (blocks.length) html += `<div class="loot-subheader">Found In</div>${lootNameListHtml(blocks)}`;
+      if (killedBy.length) html += `<div class="loot-subheader">Dropped By</div>${lootNameListHtml(killedBy)}`;
+      return html;
+    }).join("");
+    return stageBar + body;
+  }
+
+  window.__cookbookShowLoot = function (name, stage) {
+    const rows = data.lootSources && data.lootSources[name];
+    if (!rows || !rows.length) return;
+    openModal(`Loot Sources — ${displayName(name)}`, lootSourcesModalHtml(name, stage === undefined ? 49 : stage));
+  };
+
   window.__cookbookShowWarnings = function () {
     const warnings = data.meta.warnings || [];
     if (!warnings.length) return;
@@ -1300,6 +1472,7 @@ window.ULModBuddyApp = (function () {
   const ACQUISITION_SOURCE_LINKS = {
     harvestable: { sources: () => data.harvestSources, fn: "__cookbookShowHarvest", title: "See harvest sources" },
     recyclable: { sources: () => data.recycleSources, fn: "__cookbookShowRecycleSources", title: "See recycle sources" },
+    lootable: { sources: () => data.lootSources || {}, fn: "__cookbookShowLoot", title: "See loot sources" },
   };
   // Wrapped in its own flex span (margin-left: auto) rather than left as
   // loose inline badges, so it pushes to the right edge of whatever

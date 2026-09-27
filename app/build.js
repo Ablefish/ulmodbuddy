@@ -189,6 +189,21 @@ window.ULModBuddyBuilder = (function () {
         ref("Mods/UndeadLegacy/Config/Custom/loot_quests_and_airdrops.xml", await tryGetFile(custom, "loot_quests_and_airdrops.xml")),
         ref("Mods/UndeadLegacy/Config/Custom/loot_twitch.xml", await tryGetFile(custom, "loot_twitch.xml")),
       ],
+      // Loot Sources (see loadLootSources) deliberately excludes the quest
+      // file from this same family: quest-reward items already have their
+      // own acquisition channel (the Quest badge, via
+      // loadAcquisitionChannels's `rewardable`, which still uses the full
+      // lootGroupFiles above) -- showing them again as if they were "found
+      // in a container in the world" would be misleading, since these
+      // groups exist ONLY to be awarded on quest completion, never rolled
+      // from a real lootcontainer. Checked empirically: no real
+      // lootcontainer's own item tree crosses into this file's groups
+      // except the "airDrop" container, which has no in-world block of its
+      // own anyway (already excluded on that basis).
+      lootGroupFilesForSources: [
+        ref("Mods/UndeadLegacy/Config/Custom/loot_groups.xml", await tryGetFile(custom, "loot_groups.xml")),
+        ref("Mods/UndeadLegacy/Config/Custom/loot_twitch.xml", await tryGetFile(custom, "loot_twitch.xml")),
+      ],
       recycleFile: ref("Mods/UndeadLegacy/Config/Custom/recipes_recycler.xml", await tryGetFile(custom, "recipes_recycler.xml")),
       materialsFile: ref("Mods/UndeadLegacy/Config/materials.xml", await tryGetFile(config, "materials.xml")),
       baseMaterialsFile: ref("Data/Config/materials.xml", await tryGetFile(dataConfig, "materials.xml")),
@@ -197,6 +212,16 @@ window.ULModBuddyBuilder = (function () {
       baseVehiclesFile: ref("Data/Config/vehicles.xml", await tryGetFile(dataConfig, "vehicles.xml")),
       vehicleBlocksFile: ref("Mods/UndeadLegacy/Config/Custom/blocks_vehicles.xml", await tryGetFile(custom, "blocks_vehicles.xml")),
       recipeVehiclesFile: ref("Mods/UndeadLegacy/Config/Custom/recipes_vehicles.xml", await tryGetFile(custom, "recipes_vehicles.xml")),
+      entityClassesFile: ref("Mods/UndeadLegacy/Config/entityclasses.xml", await tryGetFile(config, "entityclasses.xml")),
+      baseEntityClassesFile: ref("Data/Config/entityclasses.xml", await tryGetFile(dataConfig, "entityclasses.xml")),
+      // The mod's own Mods/UndeadLegacy/Config/loot.xml opens with
+      // `<set xpath="/lootcontainers"></set>` -- wiping the base game's
+      // entire <lootcontainers> tree, templates included -- then rebuilds
+      // it purely from <include>s of its own Custom/ files. So the base
+      // game's own Data/Config/loot.xml templates are dead data for this
+      // mod; the real ones (including several UL-only templates) live in
+      // this one file instead. See loadLootTemplates().
+      lootTemplatesFile: ref("Mods/UndeadLegacy/Config/Custom/loot_templates.xml", await tryGetFile(custom, "loot_templates.xml")),
     };
   }
 
@@ -627,6 +652,254 @@ window.ULModBuddyBuilder = (function () {
   }
 
   // -------------------------------------------------------------------
+  // Loot Sources -- the "which real-world container/kill gives me this
+  // item" reverse index. loadAcquisitionChannels above already walks
+  // lootcontainer -> lootgroup -> item to produce the boolean `lootable`
+  // flag; this walks the SAME graph but keeps which container matched
+  // (like loadHarvestSources keeps which block, not just yes/no), and adds
+  // the missing link the boolean flag never needed: which real in-world
+  // block or killable entity actually leads to that container. See the
+  // chat writeup for the full three-hop chain and its caveats, summarized
+  // in each function's own comment below.
+  //
+  // Deliberately NOT modeled (same "structurally reachable, not exact
+  // odds" principle as Harvest/Recycle Sources, just more so):
+  //   - <requirement> gates (biome/quest/perk) on an <item> -- an item
+  //     behind one still shows as a source; the game may not actually
+  //     offer it to a given player right now.
+  //   - Which of several candidate containers/bags is likelier when more
+  //     than one is possible (a weighted LootDropEntityClass list, or an
+  //     item reachable via more than one <lootgroup> path) -- only
+  //     presence is tracked, not relative weight.
+  //   - The final weighted pick among an already-gated group's own
+  //     siblings (a bare prob > 1, e.g. groupWater's `prob="2"` sibling,
+  //     is a relative WEIGHT for this step, not a chance -- genuinely
+  //     unresolved from XML alone how it combines with siblings, so it's
+  //     dropped rather than multiplied in as if it were a probability).
+  //     What IS modeled: each `gates` entry (see flattenLootGroup) is an
+  //     independent access check, multiplied together in app.js for the
+  //     combined chance at a given loot stage.
+  // -------------------------------------------------------------------
+  async function loadLootTemplates(paths) {
+    const templates = {};
+    const doc = await readAndParse(paths.lootTemplatesFile);
+    if (!doc) return templates;
+    for (const el of scanBlocks(doc, "lootprobtemplate")) {
+      const name = attr(el, "name");
+      if (!name) continue;
+      const bins = [];
+      for (const lootEl of Array.from(el.getElementsByTagName("loot"))) {
+        const parts = attr(lootEl, "level", "").split(",");
+        const lo = safeFloat(parts[0], 0);
+        const hi = safeFloat(parts[parts.length - 1], lo);
+        bins.push([lo, hi, safeFloat(attr(lootEl, "prob", "0"), 0)]);
+      }
+      templates[name] = bins;
+    }
+    return templates;
+  }
+
+  // An <item>/group-reference element's OWN gate, as [prob, template] --
+  // or null if this line places no restriction of its own. A bare prob > 1
+  // is a relative WEIGHT among sibling entries once that slot is already
+  // being rolled (see chat: real probabilities can't exceed 1 -- e.g.
+  // groupWater's `prob="2"` sibling), not a chance to be reached at all;
+  // mixing an unnormalized weight into the multiplicative gate chain below
+  // would be nonsensical, so it's dropped here rather than misrepresented.
+  function lootOwnGate(el) {
+    const template = attr(el, "loot_prob_template");
+    if (template) return [null, template];
+    const probRaw = attr(el, "prob");
+    if (probRaw !== null) {
+      const p = safeFloat(probRaw, 1);
+      if (p <= 1) return [p, null];
+    }
+    return null;
+  }
+
+  // Like parseNamedGroupFamily, but keeps each entry's own gate (see
+  // lootOwnGate) alongside its name instead of just presence --
+  // loadLootSources needs each leaf's full gate CHAIN, not just its own
+  // line. Returns {groupName: [["item", name, gate] | ["group", name,
+  // gate], ...]}; gate is null or [prob, template].
+  async function parseLootGroupFamily(files) {
+    const groups = {};
+    for (const fileRef of files) {
+      const doc = await readAndParse(fileRef);
+      if (!doc) continue;
+      for (const el of scanBlocks(doc, "lootgroup")) {
+        const name = attr(el, "name");
+        if (!name) continue;
+        const children = [];
+        for (const child of Array.from(el.getElementsByTagName("item"))) {
+          const gate = lootOwnGate(child);
+          const childName = attr(child, "name");
+          if (childName) {
+            children.push(["item", childName, gate]);
+          } else if (attr(child, "group")) {
+            children.push(["group", attr(child, "group"), gate]);
+          }
+        }
+        groups[name] = children;
+      }
+    }
+    return groups;
+  }
+
+  // Recursively resolves one group reference down to leaf items,
+  // accumulating into `out` (Map<itemName, [prob, template][]>). `gates`
+  // is the CHAIN accumulated from the root down to `name` -- carrying this
+  // forward matters a lot here: a whole weapon tier is routinely gated by
+  // a loot_prob_template on the REFERENCE to its group (e.g. groupRanged's
+  // own <item group="groupRangedT1" loot_prob_template="ProbT1"/>), not on
+  // each weapon inside it. An earlier version of this function only kept a
+  // leaf's OWN line, which silently showed e.g. the AK-47 as
+  // unconditionally available at every loot stage -- wrong: it lives in
+  // groupRangedT1, gated by ProbT1, which is 0% below loot stage 10. The
+  // FIRST path found to a given leaf still wins if it's reachable more
+  // than one way -- an accepted simplification (see this feature's own
+  // header comment above).
+  function flattenLootGroup(name, groups, visited, out, gates) {
+    if (visited.has(name)) return;
+    visited.add(name);
+    for (const [kind, ref, gate] of groups[name] || []) {
+      const childGates = gate ? [...gates, gate] : gates;
+      if (kind === "item") {
+        if (!out.has(ref)) out.set(ref, childGates);
+      } else {
+        flattenLootGroup(ref, groups, visited, out, childGates);
+      }
+    }
+  }
+
+  async function loadContainerToItems(paths) {
+    // lootGroupFilesForSources, not lootGroupFiles -- see that path's own
+    // comment for why quest-reward groups are excluded here specifically.
+    const lootGroups = await parseLootGroupFamily(paths.lootGroupFilesForSources);
+    const containers = {};
+    const doc = await readAndParse(paths.lootContainersFile);
+    if (!doc) return containers;
+    for (const el of scanBlocks(doc, "lootcontainer")) {
+      const name = attr(el, "name");
+      if (!name) continue;
+      const items = new Map();
+      const visited = new Set();
+      for (const itemEl of Array.from(el.getElementsByTagName("item"))) {
+        const gate = lootOwnGate(itemEl);
+        const iname = attr(itemEl, "name");
+        if (iname) {
+          if (!items.has(iname)) items.set(iname, gate ? [gate] : []);
+        } else if (attr(itemEl, "group")) {
+          flattenLootGroup(attr(itemEl, "group"), lootGroups, visited, items, gate ? [gate] : []);
+        }
+      }
+      containers[name] = { items };
+    }
+    return containers;
+  }
+
+  // Returns {blockName: lootcontainerName} -- literal <block> elements'
+  // own LootList property only, the same scope limit as loadHarvestSources'
+  // entity_class scan: a block that inherits LootList only via an Extends
+  // chain (some do) isn't walked here.
+  async function loadBlockToLootList(paths) {
+    const blockToLootList = {};
+    for (const fileRef of [paths.baseBlockFile, ...paths.blockFiles]) {
+      if (!fileRef.handle) continue;
+      const doc = await readAndParse(fileRef);
+      if (!doc) continue;
+      for (const el of scanBlocks(doc, "block")) {
+        const name = attr(el, "name");
+        if (!name) continue;
+        for (const prop of Array.from(el.getElementsByTagName("property"))) {
+          if (attr(prop, "name") === "LootList" && attr(prop, "value")) {
+            blockToLootList[name] = attr(prop, "value");
+            break;
+          }
+        }
+      }
+    }
+    return blockToLootList;
+  }
+
+  // Returns {entityName: Set<containerName>} -- reverses the chain
+  // described in chat: killing `entityName` can spawn one of several "bag"
+  // entity classes (LootDropEntityClass, a comma-separated
+  // name,weight,name,weight,... list -- a bare name with no weight is just
+  // as valid, and the every-other-token filter below handles both shapes
+  // identically), and each bag's own LootListOnDeath property is the real
+  // lootcontainer. LootDropProb itself isn't threaded through -- see this
+  // feature's own "not modeled" list above.
+  async function loadEntityKillToContainer(paths) {
+    const entityToBags = {};
+    const bagToContainer = {};
+    for (const fileRef of [paths.baseEntityClassesFile, paths.entityClassesFile]) {
+      if (!fileRef.handle) continue;
+      const doc = await readAndParse(fileRef);
+      if (!doc) continue;
+      for (const el of scanBlocks(doc, "entity_class")) {
+        const name = attr(el, "name");
+        if (!name) continue;
+        for (const prop of Array.from(el.getElementsByTagName("property"))) {
+          const pname = attr(prop, "name");
+          if (pname === "LootDropEntityClass" && attr(prop, "value")) {
+            entityToBags[name] = attr(prop, "value").split(",").filter((_, i) => i % 2 === 0);
+          } else if (pname === "LootListOnDeath" && attr(prop, "value")) {
+            bagToContainer[name] = attr(prop, "value");
+          }
+        }
+      }
+    }
+    const entityToContainers = {};
+    for (const entityName in entityToBags) {
+      const found = new Set();
+      for (const bag of entityToBags[entityName]) {
+        const container = bagToContainer[bag.trim()];
+        if (container) found.add(container);
+      }
+      if (found.size) entityToContainers[entityName] = found;
+    }
+    return entityToContainers;
+  }
+
+  // Drops any container that isn't reachable via a real in-world block or a
+  // killable entity (trader/quest/twitch-only pools, or ones reached only
+  // through an unresolved Extends chain) -- an unreachable container name
+  // would be noise, not help.
+  async function loadLootSources(paths) {
+    const containers = await loadContainerToItems(paths);
+    const containerToBlocks = {};
+    const blockToLootList = await loadBlockToLootList(paths);
+    for (const blockName in blockToLootList) {
+      const containerName = blockToLootList[blockName];
+      (containerToBlocks[containerName] = containerToBlocks[containerName] || []).push(blockName);
+    }
+    const containerToEntities = {};
+    const entityToContainers = await loadEntityKillToContainer(paths);
+    for (const entityName in entityToContainers) {
+      for (const containerName of entityToContainers[entityName]) {
+        (containerToEntities[containerName] = containerToEntities[containerName] || []).push(entityName);
+      }
+    }
+
+    const lootSources = {};
+    for (const containerName in containers) {
+      const blocks = (containerToBlocks[containerName] || []).slice().sort();
+      const killedBy = (containerToEntities[containerName] || []).slice().sort();
+      if (!blocks.length && !killedBy.length) continue;
+      for (const [itemName, gates] of containers[containerName].items) {
+        (lootSources[itemName] = lootSources[itemName] || []).push({
+          container: containerName,
+          gates,
+          blocks,
+          killedBy,
+        });
+      }
+    }
+    return lootSources;
+  }
+
+  // -------------------------------------------------------------------
   // Shared source-row helpers (harvest + recycle)
   // -------------------------------------------------------------------
   // Never lets one bad numeric value produce a silent NaN downstream --
@@ -745,6 +1018,43 @@ window.ULModBuddyBuilder = (function () {
   }
 
   // -------------------------------------------------------------------
+  // Entity harvest (butcher) drops -- <drop> inside <entity_class> in
+  // entityclasses.xml files. Exactly the same mechanic as the block
+  // Harvestable pass just below (an event="Harvest" <drop> with a
+  // name/count/prob) -- a creature's corpse instead of a block -- so the
+  // rows are folded into the SAME harvestSources map: the "block" field
+  // just holds the entity_class name in that case, and nothing downstream
+  // (tiering, icon/name resolution, the Harvest Sources popup) needs to
+  // know the difference.
+  //
+  // Literal <entity_class> elements only, like the block scan's literal
+  // <block>/<set>/<append> elements -- an entity_class that inherits its
+  // drop list via `extends` without repeating it would be missed, but
+  // every case checked in the mod's own entityclasses.xml (e.g. all four
+  // Scorpion color variants) repeats its full drop list explicitly rather
+  // than relying on inheritance, matching the block side's own scope.
+  //
+  // The mod renames a handful of base-game animal drops via an
+  // attribute-only xpath patch (e.g. resourceLeather -> ulmResourceHide on
+  // animalStag/animalDoe/animalBear/... survival-skinning drops) rather
+  // than a <set> with real child elements -- the same shape as
+  // loadVehicleSpeeds' velocityMax_turbo patch below, so it needs the same
+  // raw-text regex instead of a DOM scan (there is no <drop> child to find
+  // by walking the DOM; the whole patch is one attribute rewrite).
+  // -------------------------------------------------------------------
+  async function loadEntityDropRenames(paths) {
+    const renames = new Map(); // "entityName\u0000oldDropName" -> newDropName
+    const modText = await readText(paths.entityClassesFile);
+    if (!modText) return renames;
+    const re = /<set xpath="\/\/entity_class\[@name='([^']+)'\s*\]\/drop\[@name='([^']+)'\s*\]\/@name">([^<]+)<\/set>/g;
+    let m;
+    while ((m = re.exec(modText))) {
+      renames.set(`${m[1]}\u0000${m[2]}`, m[3].trim());
+    }
+    return renames;
+  }
+
+  // -------------------------------------------------------------------
   // Harvestable -- <drop> inside <block>/<set>/<append> in blocks.xml files
   // -------------------------------------------------------------------
   async function loadHarvestSources(paths) {
@@ -779,6 +1089,35 @@ window.ULModBuddyBuilder = (function () {
         }
       }
     }
+
+    const entityDropRenames = await loadEntityDropRenames(paths);
+    for (const fileRef of [paths.baseEntityClassesFile, paths.entityClassesFile]) {
+      if (!fileRef.handle) continue;
+      const doc = await readAndParse(fileRef);
+      if (!doc) continue;
+      for (const entityEl of scanBlocks(doc, "entity_class")) {
+        const entityName = attr(entityEl, "name");
+        if (!entityName) continue;
+        for (const el of Array.from(entityEl.getElementsByTagName("drop"))) {
+          let name = attr(el, "name");
+          const countAttr = attr(el, "count", "1");
+          if (!name || countAttr === "0") continue;
+          const renamed = entityDropRenames.get(`${entityName}\u0000${name}`);
+          if (renamed) name = renamed;
+          harvestable.add(name);
+          const ctx = `${fileRef.label} <drop name="${name}"> (entity_class ${entityName})`;
+          const [countMin, countMax] = parseCountRange(countAttr, `${ctx} count`);
+          (harvestSources[name] = harvestSources[name] || []).push({
+            block: entityName,
+            event: attr(el, "event", "Harvest"),
+            countMin,
+            countMax,
+            prob: safeFloat(attr(el, "prob", "1"), 1, `${ctx} prob`),
+          });
+        }
+      }
+    }
+
     for (const name in harvestSources) {
       const collapsed = collapseSameBlockEvents(harvestSources[name]);
       harvestSources[name] = collapseTierVariants(collapsed, "block");
@@ -1598,6 +1937,14 @@ window.ULModBuddyBuilder = (function () {
     const { purchasable, lootable, rewardable } = await loadAcquisitionChannels(paths);
     log(`  ${purchasable.size} purchasable, ${lootable.size} lootable, ${rewardable.size} rewardable distinct name(s)`);
 
+    log("Loading loot probability/quality templates (Custom/loot_templates.xml)...");
+    const lootProbTemplates = await loadLootTemplates(paths);
+    log(`  ${Object.keys(lootProbTemplates).length} prob templates`);
+
+    log("Loading loot sources (which real containers/kills give which items)...");
+    const lootSources = await loadLootSources(paths);
+    log(`  ${Object.keys(lootSources).length} distinct item(s) with a real-world loot source`);
+
     log("Loading harvestable (block drop tables)...");
     const { harvestable, harvestSources } = await loadHarvestSources(paths);
     log(`  ${harvestable.size} harvestable distinct name(s), ${Object.values(harvestSources).reduce((s, v) => s + v.length, 0)} source row(s)`);
@@ -1639,6 +1986,13 @@ window.ULModBuddyBuilder = (function () {
     for (const n of purchasable) allNames.add(n);
     for (const n of lootable) allNames.add(n);
     for (const n of rewardable) allNames.add(n);
+    for (const name in lootSources) {
+      allNames.add(name);
+      for (const row of lootSources[name]) {
+        for (const b of row.blocks) allNames.add(b);
+        for (const e of row.killedBy) allNames.add(e);
+      }
+    }
 
     log("Loading weapon/armor mods (item_modifiers.xml)...");
     const itemMods = await loadItemModifierNames(paths);
@@ -1802,6 +2156,8 @@ window.ULModBuddyBuilder = (function () {
           vehicles: Object.keys(vehicles).length,
           vehicleRepairRecipes: Object.values(vehicleRepairs).reduce((s, t) => s + t.length, 0),
           vehicleColorVariants: Object.keys(vehicleColorVariants).length,
+          lootSourceItems: Object.keys(lootSources).length,
+          lootSourceRows: Object.values(lootSources).reduce((s, v) => s + v.length, 0),
         },
         unlockBreakdown: unlockCounts,
         warnings: WARNINGS,
@@ -1810,6 +2166,8 @@ window.ULModBuddyBuilder = (function () {
       icons,
       iconBlobs,
       acquisition,
+      lootProbTemplates,
+      lootSources,
       harvestSources,
       recycleYields,
       recycleSources,

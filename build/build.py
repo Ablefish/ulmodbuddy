@@ -51,10 +51,13 @@ ITEM_FILES = BLOCK_FILES = None
 BASE_ITEM_FILE = BASE_BLOCK_FILE = None
 MOD_ITEM_MODIFIERS_FILE = BASE_ITEM_MODIFIERS_FILE = None
 TRADERS_FILE = QUESTS_FILE = LOOT_CONTAINERS_FILE = LOOT_GROUP_FILES = None
+LOOT_GROUP_FILES_FOR_SOURCES = None
 RECYCLE_FILE = None
 VEHICLE_ITEMS_FILE = None
 MOD_VEHICLES_FILE = BASE_VEHICLES_FILE = None
 VEHICLE_BLOCKS_FILE = RECIPE_VEHICLES_FILE = None
+ENTITY_CLASSES_FILE = BASE_ENTITY_CLASSES_FILE = None
+LOOT_TEMPLATES_FILE = None
 
 
 class InstallRootError(ValueError):
@@ -93,11 +96,14 @@ def configure_paths(install_root):
     global ITEM_FILES, BLOCK_FILES, BASE_ITEM_FILE, BASE_BLOCK_FILE
     global MOD_ITEM_MODIFIERS_FILE, BASE_ITEM_MODIFIERS_FILE
     global TRADERS_FILE, QUESTS_FILE, LOOT_CONTAINERS_FILE, LOOT_GROUP_FILES
+    global LOOT_GROUP_FILES_FOR_SOURCES
     global RECYCLE_FILE
     global MATERIALS_FILE, BASE_MATERIALS_FILE
     global VEHICLE_ITEMS_FILE
     global MOD_VEHICLES_FILE, BASE_VEHICLES_FILE
     global VEHICLE_BLOCKS_FILE, RECIPE_VEHICLES_FILE
+    global ENTITY_CLASSES_FILE, BASE_ENTITY_CLASSES_FILE
+    global LOOT_TEMPLATES_FILE
 
     SRC = Path(install_root)
     MOD_ROOT = SRC / "Mods" / "UndeadLegacy"
@@ -153,6 +159,20 @@ def configure_paths(install_root):
         CONFIG / "Custom" / "loot_quests_and_airdrops.xml",
         CONFIG / "Custom" / "loot_twitch.xml",
     ]
+    # Loot Sources (see load_loot_sources()) deliberately excludes the quest
+    # file from this same family: quest-reward items already have their own
+    # acquisition channel (the Quest badge, via load_acquisition_channels()'s
+    # `rewardable`, which still uses the full LOOT_GROUP_FILES above) --
+    # showing them again as if they were "found in a container in the
+    # world" would be misleading, since these groups exist ONLY to be
+    # awarded on quest completion, never rolled from a real lootcontainer.
+    # Checked empirically: no real lootcontainer's own item tree crosses
+    # into this file's groups except the "airDrop" container, which has no
+    # in-world block of its own anyway (already excluded on that basis).
+    LOOT_GROUP_FILES_FOR_SOURCES = [
+        CONFIG / "Custom" / "loot_groups.xml",
+        CONFIG / "Custom" / "loot_twitch.xml",
+    ]
     RECYCLE_FILE = CONFIG / "Custom" / "recipes_recycler.xml"
     # The in-inventory "Scrap" action (distinct from the Recycler block above)
     # -- see load_scrap_data() for how Material+Weight on an item/block, plus
@@ -174,6 +194,19 @@ def configure_paths(install_root):
     # own block definitions -- see load_vehicle_repairs().
     VEHICLE_BLOCKS_FILE = CONFIG / "Custom" / "blocks_vehicles.xml"
     RECIPE_VEHICLES_FILE = CONFIG / "Custom" / "recipes_vehicles.xml"
+    # Entity (zombie/animal) butcher-corpse drops -- see load_harvest_sources()'s
+    # entity_class pass, folded into the same harvest_sources map as blocks.
+    ENTITY_CLASSES_FILE = CONFIG / "entityclasses.xml"
+    BASE_ENTITY_CLASSES_FILE = SRC / "Data" / "Config" / "entityclasses.xml"
+    # Loot probability/quality curves (indexed by loot stage). The mod's own
+    # top-level Mods/UndeadLegacy/Config/loot.xml opens with
+    # `<set xpath="/lootcontainers"></set>` -- wiping the base game's entire
+    # <lootcontainers> tree, templates included -- then rebuilds it purely
+    # from <include>s of its own Custom/ files. So the base game's own
+    # Data/Config/loot.xml templates are dead data for this mod; the real
+    # ones (including several UL-only templates like "baseProbTemplate")
+    # live in this one file instead. See load_loot_templates().
+    LOOT_TEMPLATES_FILE = CONFIG / "Custom" / "loot_templates.xml"
 
 
 def _read_local_config():
@@ -671,6 +704,269 @@ def load_acquisition_channels():
     return purchasable, lootable, rewardable
 
 
+# ---------------------------------------------------------------------------
+# Loot Sources -- the "which real-world container/kill gives me this item"
+# reverse index. load_acquisition_channels() above already walks
+# lootcontainer -> lootgroup -> item to produce the boolean `lootable` flag;
+# this walks the SAME graph but keeps which container matched (like
+# load_harvest_sources keeps which block, not just a yes/no), and adds the
+# missing link the boolean flag never needed: which real in-world block or
+# killable entity actually leads to that container. See the chat writeup
+# for the full three-hop chain and its caveats -- summarized in each
+# function's own docstring below.
+#
+# Deliberately NOT modeled (same "structurally reachable, not exact odds"
+# principle as Harvest/Recycle Sources, just more so):
+#   - <requirement> gates (biome/quest/perk) on an <item> -- an item behind
+#     one still shows as a source; the game may not actually offer it to a
+#     given player right now.
+#   - Which of several candidate containers/bags is likelier when more than
+#     one is possible (a weighted LootDropEntityClass list, or an item
+#     reachable via more than one <lootgroup> path) -- only presence is
+#     tracked, not relative weight.
+#   - The final weighted pick among an already-gated group's own siblings
+#     (a bare prob > 1, e.g. groupWater's `prob="2"` sibling, is a relative
+#     WEIGHT for this step, not a chance -- genuinely unresolved from XML
+#     alone how it combines with siblings, so it's dropped rather than
+#     multiplied in as if it were a probability). What IS modeled: each
+#     `gates` entry is an independent access check multiplied together --
+#     see _flatten_loot_group's own comment for why this matters (a whole
+#     weapon tier is gated by a loot_prob_template on the REFERENCE to its
+#     group, not on each weapon inside it).
+# ---------------------------------------------------------------------------
+def load_loot_templates():
+    """Returns {template_name: [(lo, hi, prob), ...]} for every
+    <lootprobtemplate> in LOOT_TEMPLATES_FILE (see that constant's own
+    comment for why the base game's Data/Config/loot.xml equivalent is NOT
+    read -- this mod replaces the whole tree). Bins are kept in source
+    order; a stage lookup is just "first bin whose [lo,hi] contains it"."""
+    templates = {}
+    if not LOOT_TEMPLATES_FILE.exists():
+        warn(f"missing expected file: {LOOT_TEMPLATES_FILE}")
+        return templates
+    text = read_text(LOOT_TEMPLATES_FILE)
+    for frag in scan_blocks(text, "lootprobtemplate"):
+        el = parse_fragment(frag, LOOT_TEMPLATES_FILE.name)
+        if el is None:
+            continue
+        name = el.attrib.get("name")
+        if not name:
+            continue
+        bins = []
+        for loot_el in el.iter("loot"):
+            parts = loot_el.attrib.get("level", "").split(",")
+            lo = _safe_float(parts[0], 0.0)
+            hi = _safe_float(parts[-1], lo)
+            bins.append((lo, hi, _safe_float(loot_el.attrib.get("prob", "0"), 0.0)))
+        templates[name] = bins
+    return templates
+
+
+def _own_gate(prob_attr, template_attr):
+    """An <item>/group-reference line's OWN gate, as (prob, template) --
+    or None if this line places no restriction of its own. A bare prob > 1
+    is a relative WEIGHT among sibling entries once that slot is already
+    being rolled (see chat: real probabilities can't exceed 1 -- e.g.
+    groupWater's `prob="2"` sibling), not a chance to be reached at all;
+    mixing an unnormalized weight into the multiplicative gate chain below
+    would be nonsensical, so it's dropped here rather than misrepresented."""
+    if template_attr:
+        return (None, template_attr)
+    if prob_attr is not None:
+        p = float(prob_attr)
+        if p <= 1:
+            return (p, None)
+    return None
+
+
+def _parse_loot_group_family(files, group_tag):
+    """Like _parse_named_group_family, but keeps each entry's own gate
+    (see _own_gate) alongside its name instead of just presence --
+    load_loot_sources() needs it to build each leaf's full gate CHAIN, not
+    just its own line. Returns {group_name: [(kind, ref, gate), ...]};
+    gate is None or (prob, template)."""
+    groups = {}
+    for path in files:
+        if not path.exists():
+            continue
+        text = read_text(path)
+        for frag in scan_blocks(text, group_tag):
+            el = parse_fragment(frag, path.name)
+            if el is None:
+                continue
+            name = el.attrib.get("name")
+            if not name:
+                continue
+            children = []
+            for child in el.iter("item"):
+                gate = _own_gate(child.attrib.get("prob"), child.attrib.get("loot_prob_template"))
+                if child.attrib.get("name"):
+                    children.append(("item", child.attrib["name"], gate))
+                elif child.attrib.get("group"):
+                    children.append(("group", child.attrib["group"], gate))
+            groups[name] = children
+    return groups
+
+
+def _flatten_loot_group(name, groups, visited, out, gates):
+    """Recursively resolves one group reference down to leaf items,
+    accumulating into `out` ({item_name: [(prob, template), ...]}).
+    `gates` is the CHAIN accumulated from the root down to `name` --
+    carrying this forward matters a lot here: a whole weapon tier is
+    routinely gated by a loot_prob_template on the REFERENCE to its group
+    (e.g. groupRanged's own <item group="groupRangedT1"
+    loot_prob_template="ProbT1"/>), not on each weapon inside it. An
+    earlier version of this function only kept a leaf's OWN line, which
+    silently showed e.g. the AK-47 as unconditionally available at every
+    loot stage -- wrong: it lives in groupRangedT1, gated by ProbT1, which
+    is 0% below loot stage 10. The FIRST path found to a given leaf still
+    wins if it's reachable more than one way -- an accepted simplification
+    (see this module's own header comment on this feature)."""
+    if name in visited:
+        return
+    visited.add(name)
+    for kind, ref, gate in groups.get(name, []):
+        child_gates = gates + [gate] if gate else gates
+        if kind == "item":
+            if ref not in out:
+                out[ref] = child_gates
+        else:
+            _flatten_loot_group(ref, groups, visited, out, child_gates)
+
+
+def _load_container_to_items():
+    """Returns {container_name: {"items": {item_name: [(prob, template), ...]},
+    "meta": {...container's own attrs...}}} -- each item's value is its full
+    gate chain (see _flatten_loot_group), empty if nothing gates it at all.
+    Uses LOOT_GROUP_FILES_FOR_SOURCES, not the full LOOT_GROUP_FILES -- see
+    that constant's own comment for why quest-reward groups are excluded
+    here specifically."""
+    loot_groups = _parse_loot_group_family(LOOT_GROUP_FILES_FOR_SOURCES, "lootgroup")
+    containers = {}
+    if not LOOT_CONTAINERS_FILE.exists():
+        warn(f"missing expected file: {LOOT_CONTAINERS_FILE}")
+        return containers
+    text = read_text(LOOT_CONTAINERS_FILE)
+    for frag in scan_blocks(text, "lootcontainer"):
+        el = parse_fragment(frag, LOOT_CONTAINERS_FILE.name)
+        if el is None:
+            continue
+        name = el.attrib.get("name")
+        if not name:
+            continue
+        items = {}
+        visited = set()
+        for item_el in el.iter("item"):
+            gate = _own_gate(item_el.attrib.get("prob"), item_el.attrib.get("loot_prob_template"))
+            if item_el.attrib.get("name"):
+                iname = item_el.attrib["name"]
+                if iname not in items:
+                    items[iname] = [gate] if gate else []
+            elif item_el.attrib.get("group"):
+                _flatten_loot_group(item_el.attrib["group"], loot_groups, visited, items, [gate] if gate else [])
+        containers[name] = {"items": items, "meta": dict(el.attrib)}
+    return containers
+
+
+def _load_block_to_lootlist():
+    """Returns {block_name: lootcontainer_name} -- literal <block>
+    elements' own LootList property only, the same scope limit as
+    load_harvest_sources' entity_class scan: a block that inherits
+    LootList only via an Extends chain (some do) isn't walked here."""
+    block_to_lootlist = {}
+    for path in (BASE_BLOCK_FILE, *BLOCK_FILES):
+        if not path or not path.exists():
+            continue
+        text = read_text(path)
+        for frag in scan_blocks(text, "block"):
+            el = parse_fragment(frag, path.name)
+            if el is None:
+                continue
+            name = el.attrib.get("name")
+            if not name:
+                continue
+            for prop in el.iter("property"):
+                if prop.attrib.get("name") == "LootList" and prop.attrib.get("value"):
+                    block_to_lootlist[name] = prop.attrib["value"]
+                    break
+    return block_to_lootlist
+
+
+def _load_entity_kill_to_container():
+    """Returns {entity_name: set(container_name)} -- reverses the chain
+    described in chat: killing `entity_name` can spawn one of several
+    "bag" entity classes (LootDropEntityClass, a comma-separated
+    name,weight,name,weight,... list -- a bare name with no weight is just
+    as valid, and the [0::2] slice below handles both shapes identically),
+    and each bag's own LootListOnDeath property is the real lootcontainer.
+    LootDropProb itself isn't threaded through -- see this feature's own
+    "not modeled" list above."""
+    entity_to_bags = {}
+    bag_to_container = {}
+    for path in (BASE_ENTITY_CLASSES_FILE, ENTITY_CLASSES_FILE):
+        if not path or not path.exists():
+            continue
+        text = read_text(path)
+        for frag in scan_blocks(text, "entity_class"):
+            el = parse_fragment(frag, path.name)
+            if el is None:
+                continue
+            name = el.attrib.get("name")
+            if not name:
+                continue
+            for prop in el.iter("property"):
+                pname = prop.attrib.get("name")
+                if pname == "LootDropEntityClass" and prop.attrib.get("value"):
+                    entity_to_bags[name] = prop.attrib["value"].split(",")[0::2]
+                elif pname == "LootListOnDeath" and prop.attrib.get("value"):
+                    bag_to_container[name] = prop.attrib["value"]
+
+    entity_to_containers = {}
+    for entity_name, bags in entity_to_bags.items():
+        found = {bag_to_container[b.strip()] for b in bags if b.strip() in bag_to_container}
+        if found:
+            entity_to_containers[entity_name] = found
+    return entity_to_containers
+
+
+def load_loot_sources():
+    """Returns {item_name: [{"container", "gates", "blocks", "killedBy"},
+    ...]}. `gates` is the item's full chain of independent access checks
+    from the container down to it (see _flatten_loot_group) -- each entry
+    is [prob, template] (prob XOR template, the other null), e.g. the AK-47
+    carries a single gate on "ProbT1" (0% below loot stage 10) from its
+    tier group being referenced with loot_prob_template, not from anything
+    on its own <item> line. An empty list means nothing gates it at all.
+    Drops any container that isn't reachable via a real in-world block or a
+    killable entity (trader/quest/twitch-only pools, or ones reached only
+    through an unresolved Extends chain) -- an unreachable container name
+    would be noise, not help, the same call already made for the
+    standalone loot-source prototype this replaces."""
+    containers = _load_container_to_items()
+    container_to_blocks = {}
+    for block_name, container_name in _load_block_to_lootlist().items():
+        container_to_blocks.setdefault(container_name, []).append(block_name)
+    container_to_entities = {}
+    for entity_name, container_names in _load_entity_kill_to_container().items():
+        for cname in container_names:
+            container_to_entities.setdefault(cname, []).append(entity_name)
+
+    loot_sources = {}
+    for container_name, info in containers.items():
+        blocks = sorted(container_to_blocks.get(container_name, []))
+        entities = sorted(container_to_entities.get(container_name, []))
+        if not blocks and not entities:
+            continue
+        for item_name, gates in info["items"].items():
+            loot_sources.setdefault(item_name, []).append({
+                "container": container_name,
+                "gates": gates,
+                "blocks": blocks,
+                "killedBy": entities,
+            })
+    return loot_sources
+
+
 def _safe_float(value, default, context=None):
     """Never crashes the whole build over one bad numeric value -- warns and
     falls back instead. `context` is a short string identifying where the
@@ -835,6 +1131,16 @@ def load_harvest_sources():
         that's ALSO positively dropped by some other block still ends up in
         the set via that other <drop>, so this only ever removes rows that
         are exclusively zero everywhere.
+
+        A second pass folds in entity_class butcher-corpse drops (Data/Config
+        + Mods/UndeadLegacy/Config entityclasses.xml) into this SAME map --
+        identical shape (event="Harvest" <drop> with name/count/prob), a
+        creature's corpse standing in for a block, so "block" here just holds
+        the entity_class name in that case. Literal <entity_class> elements
+        only, same scope as the block scan above: an entity_class that
+        inherits its drop list via `extends` without repeating it would be
+        missed, but every case checked in the mod's own file (e.g. all four
+        Scorpion color variants) repeats its full drop list explicitly.
     """
     harvestable = set()
     harvest_sources = {}
@@ -865,11 +1171,62 @@ def load_harvest_sources():
                     "countMax": count_max,
                     "prob": _safe_float(el.attrib.get("prob", "1"), 1.0, f"{ctx} prob"),
                 })
+    entity_drop_renames = _load_entity_drop_renames()
+    for path in (BASE_ENTITY_CLASSES_FILE, ENTITY_CLASSES_FILE):
+        if not path.exists():
+            continue
+        text = read_text(path)
+        for frag in scan_blocks(text, "entity_class"):
+            entity_el = parse_fragment(frag, path.name)
+            if entity_el is None:
+                continue
+            entity_name = entity_el.attrib.get("name")
+            if not entity_name:
+                continue
+            for drop_el in entity_el.iter("drop"):
+                name = drop_el.attrib.get("name")
+                count_attr = drop_el.attrib.get("count", "1")
+                if not name or count_attr == "0":
+                    continue
+                name = entity_drop_renames.get((entity_name, name), name)
+                harvestable.add(name)
+                ctx = f"{path.name} <drop name=\"{name}\"> (entity_class {entity_name})"
+                count_min, count_max = _parse_count_range(count_attr, f"{ctx} count")
+                harvest_sources.setdefault(name, []).append({
+                    "block": entity_name,
+                    "event": drop_el.attrib.get("event", "Harvest"),
+                    "countMin": count_min,
+                    "countMax": count_max,
+                    "prob": _safe_float(drop_el.attrib.get("prob", "1"), 1.0, f"{ctx} prob"),
+                })
+
     for name, sources in harvest_sources.items():
         collapsed = _collapse_same_block_events(sources)
         harvest_sources[name] = _collapse_tier_variants(collapsed)
     _sort_and_tier_sources(harvest_sources, "block")
     return harvestable, harvest_sources
+
+
+# The mod renames a handful of base-game animal drops via an attribute-only
+# xpath patch (e.g. resourceLeather -> ulmResourceHide on
+# animalStag/animalDoe/animalBear/... survival-skinning drops), not a <set>
+# with a real child element -- the same shape as load_vehicle_speeds' own
+# attr_set_re, so it needs the same raw-text regex rather than a DOM scan.
+_ENTITY_DROP_RENAME_RE = re.compile(
+    r"<set xpath=\"//entity_class\[@name='([^']+)'\s*\]/drop\[@name='([^']+)'\s*\]/@name\">"
+    r"([^<]+)</set>"
+)
+
+
+def _load_entity_drop_renames():
+    """Returns {(entity_name, old_drop_name): new_drop_name}."""
+    renames = {}
+    if not ENTITY_CLASSES_FILE.exists():
+        return renames
+    text = read_text(ENTITY_CLASSES_FILE)
+    for entity_name, old_name, new_name in _ENTITY_DROP_RENAME_RE.findall(text):
+        renames[(entity_name, old_name)] = new_name.strip()
+    return renames
 
 
 def _sort_and_tier_sources(sources_map, key):
@@ -1994,6 +2351,14 @@ def main(install_root):
     print(f"  {len(purchasable)} purchasable, {len(lootable)} lootable, "
           f"{len(rewardable)} rewardable distinct name(s)")
 
+    print("Loading loot probability/quality templates (Custom/loot_templates.xml)...")
+    loot_prob_templates = load_loot_templates()
+    print(f"  {len(loot_prob_templates)} prob templates")
+
+    print("Loading loot sources (which real containers/kills give which items)...")
+    loot_sources = load_loot_sources()
+    print(f"  {len(loot_sources)} distinct item(s) with a real-world loot source")
+
     print("Loading harvestable (block drop tables)...")
     harvestable, harvest_sources = load_harvest_sources()
     print(f"  {len(harvestable)} harvestable distinct name(s), "
@@ -2052,6 +2417,11 @@ def main(install_root):
     # never get an icon lookup attempted at all, even when a perfectly good
     # one exists in an atlas.
     all_names |= purchasable | lootable | rewardable
+    for name, rows in loot_sources.items():
+        all_names.add(name)
+        for row in rows:
+            all_names.update(row["blocks"])
+            all_names.update(row["killedBy"])
 
     print("Loading weapon/armor mods (item_modifiers.xml)...")
     item_mods = load_item_modifier_names()
@@ -2235,6 +2605,8 @@ def main(install_root):
                 "vehicles": len(vehicles),
                 "vehicleRepairRecipes": sum(len(t) for t in vehicle_repairs.values()),
                 "vehicleColorVariants": len(vehicle_color_variants),
+                "lootSourceItems": len(loot_sources),
+                "lootSourceRows": sum(len(v) for v in loot_sources.values()),
             },
             "unlockBreakdown": unlock_counts,
             "warnings": WARNINGS,
@@ -2242,6 +2614,8 @@ def main(install_root):
         "names": names,
         "icons": icons,
         "acquisition": acquisition,
+        "lootProbTemplates": loot_prob_templates,  # {name: [(lo, hi, prob), ...]} -- tuples serialize as JSON arrays
+        "lootSources": loot_sources,
         "harvestSources": harvest_sources,
         "recycleYields": recycle_yields,
         "recycleSources": recycle_sources,

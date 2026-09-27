@@ -580,11 +580,11 @@ img.icon-ring-workstation {
   visibility: hidden;
 }
 
-/* Harvest and Recycle are the two badges that are ever interactive (see the
-   shared source modal below) -- solid-filled with white text rather than
-   the usual outline, so a clickable badge reads as a little button at a
-   glance instead of just another fact, not only on hover. Each badge
-   type fills with ITS OWN color (not a single hardcoded one), since
+/* Harvest, Recycle, and Loot are the three badges that are ever interactive
+   (see the shared source modal below) -- solid-filled with white text
+   rather than the usual outline, so a clickable badge reads as a little
+   button at a glance instead of just another fact, not only on hover. Each
+   badge type fills with ITS OWN color (not a single hardcoded one), since
    there's more than one clickable channel now; brightens further on
    hover as the interactive affordance the filled state doesn't already
    cover. */
@@ -599,6 +599,10 @@ img.icon-ring-workstation {
 .acq-badge-recyclable.acq-badge-clickable {
   background: var(--acq-recyclable);
   border-color: var(--acq-recyclable);
+}
+.acq-badge-lootable.acq-badge-clickable {
+  background: var(--acq-lootable);
+  border-color: var(--acq-lootable);
 }
 .acq-badge-clickable:hover {
   filter: brightness(1.25);
@@ -1193,6 +1197,58 @@ img.icon-ring-workstation {
   font-size: 11px;
   white-space: nowrap;
   padding-left: 8px;
+}
+
+/* Loot Sources modal only -- the stage-tier picker (see build.js's
+   loadLootSources comment for why this is a live re-render off a shipped
+   probability curve, not a rebuild) and the block/killed-by sublines each
+   row can carry. */
+.loot-stage-bar {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.loot-stage-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-alt);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.loot-stage-btn:hover {
+  filter: brightness(1.15);
+}
+.loot-stage-btn-active {
+  background: var(--acq-lootable);
+  border-color: var(--acq-lootable);
+  color: #fff;
+}
+/* One shared "Found In"/"Dropped By" list per tier (see
+   lootSourcesModalHtml) rather than repeating either heading per
+   container -- a plain small-caps label above its own flat, deduped
+   icon+name list. */
+.loot-subheader {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  margin: 8px 0 2px;
+}
+.loot-flat-list .ing-icon {
+  width: 14px;
+  height: 14px;
+}
+.loot-empty-note {
+  color: var(--text-dim);
+  text-align: center;
+  padding: 24px 0;
 }
 
 /* ---------------------------------------------------------------------
