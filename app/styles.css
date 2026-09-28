@@ -827,6 +827,14 @@ img.icon-ring-workstation {
   border-radius: 4px;
   overflow: hidden;
 }
+/* Without this, the UA [hidden]{display:none} rule loses to the
+   display:inline-flex above (same specificity, this rule was declared
+   first) -- the exact bug already caught once before in this project
+   (icon-select-field/tree-legend) whenever a flex/inline-flex element
+   gets toggled via the `hidden` attribute rather than a class. */
+.tree-mode-toggle[hidden] {
+  display: none;
+}
 .tree-mode-btn {
   background: var(--panel-alt);
   border: none;
@@ -987,10 +995,32 @@ img.icon-ring-workstation {
   background: var(--panel-alt);
 }
 
-.tree-legend-tier-1 { border-color: var(--direct); }
-.tree-legend-tier-2 { border-color: var(--accent); }
-.tree-legend-tier-3 { border-color: var(--unknown); }
-.tree-legend-tier-unlocked { border-color: var(--always); }
+/* Center tinted with the same 16% color-mix the recipe grid's own dots
+   use (.rgrid-fill-tier-*), not just the plain --panel-alt every other
+   swatch defaults to -- makes the legend's own ring swatches read as a
+   small preview of the actual dot style instead of a flatter stand-in. */
+.tree-legend-tier-1 { border-color: var(--direct); background: color-mix(in srgb, var(--direct) 16%, var(--panel-alt)); }
+.tree-legend-tier-2 { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--panel-alt)); }
+.tree-legend-tier-3 { border-color: var(--unknown); background: color-mix(in srgb, var(--unknown) 16%, var(--panel-alt)); }
+.tree-legend-tier-unlocked { border-color: var(--always); background: color-mix(in srgb, var(--always) 16%, var(--panel-alt)); }
+
+/* Only relevant in "Recipe grid" mode -- its dots carry a second, subtle
+   tier signal (the background fill, see .rgrid-fill-tier-* in the recipe
+   grid section below) that the research tree's own nodes don't have at
+   all, so these stay hidden until setTreeMode adds the mode class. One
+   example tier (2/accent) stands in for all four -- the color-to-tier
+   mapping is already taught by the swatches above; the only new thing to
+   learn here is which visual channel (ring vs fill) means what. */
+.tree-legend-recipe-only {
+  display: none;
+}
+#tree-tier-legend.tree-legend-mode-recipes .tree-legend-recipe-only {
+  display: inline-flex;
+}
+.tree-legend-fill-tier-2 {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-alt));
+}
 
 /* No native scrollbars -- panning/zooming (app.js) replaces scrolling, so
    this needs a real fixed height (not max-height) to act as a stable
@@ -1098,7 +1128,7 @@ img.icon-ring-workstation {
 .tree-node circle {
   fill: var(--panel-alt);
   stroke: var(--direct);
-  stroke-width: 4;
+  stroke-width: 2;
 }
 
 /* Not --accent -- that's also Tier 2's ring color (see .tree-node-tier-2),
@@ -1106,11 +1136,11 @@ img.icon-ring-workstation {
    distinct from every tier/unlocked color the ring could already be. */
 .tree-node:hover circle {
   stroke: var(--text);
-  stroke-width: 6;
+  stroke-width: 3;
 }
 
 .tree-node-large circle {
-  stroke-width: 6;
+  stroke-width: 3;
 }
 
 .tree-node-tier-1 circle { stroke: var(--direct); }
@@ -1132,43 +1162,51 @@ img.icon-ring-workstation {
   fill: var(--text);
 }
 
-/* Research tree, by workstation -- node fill/edge stroke are set inline
-   per element (see renderWorkstationTreeSvg's workstationNodeColor), so
-   these rules deliberately never set fill/stroke themselves other than
-   the hover ring, which needs to win regardless of a node's own color. */
-.wtree-node circle {
-  stroke: none;
+/* Research tree, recipe grid -- one icon+ring node per distinct recipe,
+   same visual language as the research tree's own nodes (.tree-node,
+   reused directly: tier ring color, panel-alt fill, real icon inside) --
+   just the recipe's own icon instead of a research icon, and much smaller
+   since a block can hold a couple hundred of these. .tree-node's own
+   stroke-width (4, tuned for its much bigger r=36+ nodes) would all but
+   swallow a r=9 dot, so it's thinned out proportionally here. */
+.rgrid-node circle {
+  stroke-width: 0.75;
 }
-.wtree-node:hover circle {
-  stroke: var(--text);
-  stroke-width: 2;
+.rgrid-node:hover circle {
+  stroke-width: 1.25;
 }
-.wtree-edge {
-  fill: none;
-  stroke-width: 1;
-}
-.wtree-section-bg {
-  fill: var(--panel-alt);
-}
-.wtree-divider {
-  stroke: var(--border);
-  stroke-width: 1;
-  stroke-dasharray: 4 6;
-}
-.wtree-section-divider {
-  stroke: var(--border);
-  stroke-width: 1;
-}
-.wtree-header {
-  fill: var(--text-dim);
-  font-size: 20px;
-}
-.wtree-row-label text {
+/* Subtle background tint for the RESEARCH bench tier that unlocked this
+   recipe -- a different axis from the ring above it (that's the CRAFTING
+   station tier the recipe itself needs; see recipeGridGroups in app.js
+   for why they aren't always the same value). Deliberately faint (16% of
+   the tier color mixed into the same --panel-alt the ring's own fill
+   already uses): this is a secondary annotation, not meant to compete
+   with the ring for attention. */
+.rgrid-fill-tier-0 circle { fill: color-mix(in srgb, var(--direct) 16%, var(--panel-alt)); }
+.rgrid-fill-tier-1 circle { fill: color-mix(in srgb, var(--accent) 16%, var(--panel-alt)); }
+.rgrid-fill-tier-2 circle { fill: color-mix(in srgb, var(--unknown) 16%, var(--panel-alt)); }
+.rgrid-fill-tier-none circle { fill: color-mix(in srgb, var(--always) 16%, var(--panel-alt)); }
+/* Left-aligned, not centered: a single-line title sits right after the
+   icon (see rgShapeGroup/renderRecipeGridSvg in app.js) -- a long name
+   grows the block WIDER to fit that one line rather than wrapping, so the
+   header stays exactly one row tall no matter the name length.
+   Deliberately smaller than a tree-node's own 22px label -- this label
+   names a whole block of icons, not one, so it should read as secondary
+   to them rather than competing at the same visual weight. */
+.rgrid-label text {
   fill: var(--text);
-  font-size: 20px;
+  font-size: 11px;
 }
-.wtree-col-icon {
-  opacity: 0.85;
+
+/* Backdrop behind the workstation icon (not a tier ring -- this label
+   names the whole block, it isn't one recipe -- just a neutral fill so a
+   dark or low-contrast icon doesn't blend into the modal's own dark
+   background). See renderRecipeGridSvg for why some workstations have no
+   icon at all rather than one that's merely hard to see. */
+.rgrid-label-icon-bg {
+  fill: var(--panel-alt);
+  stroke: var(--border);
+  stroke-width: 1;
 }
 
 /* High/medium/low is relative to the best source for THIS item (see

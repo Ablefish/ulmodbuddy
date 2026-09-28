@@ -97,26 +97,52 @@ always where you should actually go looking first.
 
 The **Research Tree** button (header, top right) opens a full visual map
 of one research category at a time -- pick a category from the dropdown
-to switch trees. Each node's ring color shows which Research Station tier
-you need to conduct that specific research (see the legend at the top);
-it's not related to the tier of whatever workstation the unlocked recipe
-itself needs to craft with.
+to switch trees. A **Research tree / Recipe grid** toggle picks which of
+two views you're looking at:
+
+- **Research tree** is the connected node map: each node's ring color
+  shows which Research Station tier you need to conduct that specific
+  research (see the legend at the top); it's not related to the tier of
+  whatever workstation the unlocked recipe itself needs to craft with.
+- **Recipe grid** drops the research connections entirely and instead
+  shows every recipe the category unlocks, one icon each, packed into a
+  compact block per workstation -- useful for seeing everything one
+  station can make at a glance instead of following its research chain
+  node by node. Each workstation's own header icon carries two pieces of
+  information too: its ring shows whether it's a tiered station family at
+  all, and its background tint shows how early you can research building
+  it in the first place.
 
 ![Research Tree for the "Cooking" category, showing tier-colored ring icons, the category dropdown, and a hover popup listing what Spaghetti unlocks](docs/screenshots/research-tree.png)
 
-Getting around a tree bigger than the window:
+In Recipe grid mode, each recipe icon itself carries two independent
+tiers, both spelled out in the legend once you switch: the **ring** color
+is the tier of the *workstation* the recipe needs to craft, while a
+subtle **background tint** shows the tier of the *research* that unlocked
+it -- a different axis that doesn't always agree, since nothing stops an
+early research node from unlocking something that needs a late-game
+station. A **Sort: workstation tier / research tier** toggle picks which
+of the two orders the icons within each block; switch to research tier to
+make exactly that kind of mismatch jump out -- a recipe you can research
+early floats to the top of its block while its ring still shows the high
+station tier it actually requires, instead of sinking to the bottom
+sorted by that same station tier.
+
+Getting around a tree/grid bigger than the window:
 
 - **Click-drag** anywhere on the canvas to pan around. Panning stops at
   the tree's own edges -- you can't drag it off into empty space forever.
 - **Scroll wheel** zooms in/out, centered on wherever your cursor is.
 - The **−** / **+** buttons in the corner zoom in fixed steps, centered
-  on the middle of the view; **Fit** snaps back to the default
-  zoomed-out overview of the whole category.
-- **Hovering a node** pops up what it unlocks -- Spaghetti's own node,
-  shown above, unlocks just the one recipe; some research nodes unlock
-  several at once.
-- **Clicking a node** jumps straight to that item/research's own detail
-  page, same as clicking it in the search results.
+  on the middle of the view; **Fit** snaps back to the default overview
+  of the whole category, scaled to fill the available space on whichever
+  axis is more constraining (so a small category fills the view rather
+  than sitting tiny in the middle of it).
+- **Hovering a node or recipe icon** pops up what it is -- Spaghetti's
+  own research node, shown above, unlocks just the one recipe; some
+  research nodes unlock several at once.
+- **Clicking a node or recipe icon** jumps straight to that item/research's
+  own detail page, same as clicking it in the search results.
 
 ## Vehicles
 

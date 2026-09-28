@@ -16,8 +16,9 @@ mod for *7 Days to Die*, built directly from your own install:
   your inventory or at a Recycler.
 - **Harvest** and **Recycle Sources** -- every source for a given item,
   ranked by expected yield.
-- **Research Tree** -- a visual map of each research category; hover a
-  node to see what it unlocks.
+- **Research Tree** -- a visual map of each research category, or a
+  compact grid of every recipe grouped by workstation; hover an icon to
+  see what it unlocks.
 - **Vehicles** -- per-vehicle stats, tiered repair costs, and a sortable
   comparison table across all of them.
 - **Build warnings** -- gaps or oddities in the mod's own data (typos,

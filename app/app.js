@@ -42,10 +42,12 @@ window.ULModBuddyApp = (function () {
   const treeCategoryBtnLabelEl = $("#tree-category-btn-label");
   const treeCategoryMenuEl = $("#tree-category-menu");
   const treeCategoryFieldEl = $("#tree-category-field");
-  const treeModeCategoryBtnEl = $("#tree-mode-category");
-  const treeModeWorkstationBtnEl = $("#tree-mode-workstation");
+  const treeModeTreeBtnEl = $("#tree-mode-tree");
+  const treeModeRecipesBtnEl = $("#tree-mode-recipes");
+  const treeSortToggleEl = $("#tree-sort-toggle");
+  const treeSortTierBtnEl = $("#tree-sort-tier");
+  const treeSortResearchBtnEl = $("#tree-sort-research");
   const treeTierLegendEl = $("#tree-tier-legend");
-  const treeWorkstationLegendEl = $("#tree-workstation-legend");
   const treeCanvasWrapEl = $("#tree-canvas-wrap");
   const treeCanvasInnerEl = $("#tree-canvas-inner");
   const treeZoomInEl = $("#tree-zoom-in");
@@ -150,9 +152,8 @@ window.ULModBuddyApp = (function () {
   // Single-tier stations (campfire, stove, cementMixer) never appear in
   // data.upgrades at all -- no tierInfo entry, same as any other block name
   // that happens not to be part of a real upgrade chain (see
-  // renderWorkstationTreeSvg, which treats both cases identically: no tier
-  // to place them by).
-  const alwaysAvailableStations = new Set(data.alwaysAvailableStations || []);
+  // workstationRowKeyFor, which treats both cases identically: no tier to
+  // place them by).
 
   // Tier 1's raw localized name is plain ("Carpenter's Table"); later tiers
   // already read "Carpenter's Table (Tier 2)" in the mod's own Localization
@@ -782,39 +783,21 @@ window.ULModBuddyApp = (function () {
   }
 
   // ---------------------------------------------------------------------
-  // Research tree, by workstation -- a second lens on the same 589 nodes.
-  // renderResearchTreeSvg groups by category and shows the RESEARCH bench
-  // tier (node.area, always ulmStationResearch_*) as a ring color. This
-  // groups by the CRAFTING workstation each node's own unlock actually
-  // needs instead -- a materially different axis, since every category's
-  // nodes are conducted at the same one Research Table but craft at many
-  // different stations. Tier becomes real columns; category is kept as
-  // each node's own fill color, which is what makes it visible that a
-  // workstation's row is never just one category's worth of nodes.
-  //
-  // A workstation with no tier variants at all (no entry in data.upgrades)
-  // -- Backpack, Campfire, and a handful of single-tier stations like the
-  // Kiln -- gets one row spanning every column instead of living in one,
-  // since there's no tier to place it by.
-  // ---------------------------------------------------------------------
+  // Tier-agnostic workstation identity for a recipe: which physical
+  // CRAFTING station (not the research-conducting bench -- a different
+  // axis entirely, always ulmStationResearch_*) a recipe's own unlock
+  // actually requires. Shared by the recipe grid's grouping below.
 
-  // A node can unlock recipe variants needing different areas (e.g. a
-  // resource craftable by hand OR faster at a powered station) -- prefers
-  // no station, then an always-available one, then the lowest tier of a
-  // real family, so placement favors the cheapest path rather than an
-  // arbitrary one.
-  function primaryAreaFor(areas) {
-    if (areas.has(null)) return null;
-    for (const a of areas) {
-      if (alwaysAvailableStations.has(a)) return a;
-    }
-    let best = null;
-    for (const a of areas) {
-      const info = tierInfo[a];
-      if (info && (!best || info.tierIndex < tierInfo[best].tierIndex)) best = a;
-    }
-    return best || areas.values().next().value;
-  }
+  // Almost every always-available station's own area tag IS its real
+  // internal name (campfire, cementMixer both have their own name+icon
+  // entry directly). "stove" is the one known exception: the tag has its
+  // own (icon-less) name entry ("Stove"), but the real placeable item --
+  // proper name ("Powered Stove") and a real icon -- lives under a
+  // completely different internal name. Confirmed against what the main
+  // search nav itself resolves "Powered Stove" to (data.names /
+  // data.icons), not guessed.
+  const AREA_DISPLAY_OVERRIDES = { stove: "ulmStationStovePoweredVariantHelper" };
+  const workstationDisplayKeyFor = (key) => AREA_DISPLAY_OVERRIDES[key] || key;
 
   function workstationRowKeyFor(area) {
     if (area === null) return { key: "__backpack__", label: "Backpack", tiered: false };
@@ -825,287 +808,366 @@ window.ULModBuddyApp = (function () {
     // Always-available (campfire/stove/cementMixer) and any other block
     // that simply never appears in data.upgrades are the same case here:
     // no tier axis, so no column to put it in.
-    return { key: area, label: displayName(area), tiered: false };
+    return { key: area, label: displayName(workstationDisplayKeyFor(area)), tiered: false };
   }
 
-  // Resolves every research node with something craftable to a
-  // {rowKey, col} pair, then buckets them into rows. A node with nothing
-  // craftable at all (7 of 589 -- a pure hub) has nowhere to go and is
-  // skipped entirely.
-  function buildWorkstationTreeData() {
-    const resolved = new Map();
-    for (const name of Object.keys(data.research)) {
-      const node = data.research[name];
-      const recipeNames = researchUnlockedRecipeNames(node);
-      if (!recipeNames.length) continue;
+  // ---------------------------------------------------------------------
+  // Research tree, recipe grid -- one category at a time: no research
+  // nodes or connecting lines, just every distinct (recipe, workstation)
+  // pair the category unlocks (deduped -- several research nodes can
+  // unlock the same recipe; a recipe craftable at more than one station,
+  // e.g. a campfire-or-stove variant, gets one dot in EACH of those
+  // stations' own blocks -- see recipeGridGroups), grouped by
+  // tier-agnostic crafting-workstation identity (workstationRowKeyFor
+  // above), then packed into one compact rectangle.
+  //
+  // The packing itself (rgBlockShape/rgCells, plus the shelf-pack scoring
+  // in rgPackBlocks) is the shared block-shape + shelf-pack algorithm from
+  // compact-groups-approach.md, ported as-is: each workstation group
+  // becomes its own near-square block of dots, and every block for the
+  // category is then shelf-packed edge to edge by trying every candidate
+  // total width and keeping whichever is closest to square with the least
+  // wasted area. This replaced an earlier row-sharing approach that scored
+  // purely on rounding waste -- that objective quietly rewarded pulling
+  // groups apart into singletons (a lone group always has zero rounding
+  // waste), fragmenting badly on real category data.
+  //
+  // Departure from the shared doc's own `layout()`: every block gets its
+  // own HEADER band above its dots (icon + title, single line, left-
+  // aligned, vertically centered against the icon), sized and shaped by
+  // rgShapeGroup -- always exactly one grid row tall, same height as the
+  // icon itself, that the dot grid below never shares. A long name can't
+  // make the header taller (no wrapping) or encroach on a row of dots the
+  // way an earlier multi-row "notch" design once let it -- it makes the
+  // BLOCK WIDER instead, trading width for a header height that's always
+  // consistent. rgBlockShape (a pure count -> near-square shape function)
+  // has no notion of a header, so rgShapeGroup wraps it: it picks `cols`
+  // as whichever is wider, the near-square shape for the dot count alone
+  // or the header's own minimum width (icon + gap + the full title,
+  // RG_MIN_BLOCK_COLS floor), then derives the dot rows directly.
+  // rgPackBlocks is the same shelf-pack/scoring loop as the doc's
+  // `layout()`, just taking already-shaped blocks instead of deriving each
+  // one from its count alone.
+  // ---------------------------------------------------------------------
+  const ceilDiv = (a, b) => Math.floor((a + b - 1) / b);
+  function rgLessThan(a, b) {
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return a[i] < b[i];
+    }
+    return false;
+  }
+  function rgBlockShape(n, maxAspect = 2) {
+    if (n <= 0) return [0, 0];
+    let best = null;
+    for (let rows = 1; ; rows++) {
+      const cols = ceilDiv(n, rows);
+      if (rows > cols) break;
+      if ((n < 3 || rows >= 2) && cols <= maxAspect * rows) {
+        const key = [rows * cols - n, cols - rows];
+        if (best === null || rgLessThan(key, best.key)) best = { key, rows, cols };
+      }
+    }
+    if (best === null) {
+      // maxAspect too strict for this n: fall back to square-ish
+      let s = 0;
+      while (s * s < n) s++;
+      return [ceilDiv(n, s), s];
+    }
+    return [best.rows, best.cols];
+  }
+  function rgShelfPack(order, width, gap) {
+    let x = 0, y = 0, shelfH = 0, usedW = 0;
+    const pos = new Map();
+    for (const b of order) {
+      if (x > 0 && x + b.cols > width) {
+        y += shelfH + gap;
+        x = 0;
+        shelfH = 0;
+      }
+      pos.set(b.index, [x, y]);
+      usedW = Math.max(usedW, x + b.cols);
+      shelfH = Math.max(shelfH, b.rows);
+      x += b.cols + gap;
+    }
+    return { pos, usedW, usedH: y + shelfH };
+  }
+  // Packs already-shaped blocks ({index, count, rows, cols}) -- see the
+  // header comment above for why the recipe grid shapes its own blocks
+  // (rgShapeGroup) rather than calling rgBlockShape straight from a bare
+  // count array the way the shared doc's `layout()` does.
+  function rgPackBlocks(blocks, { gap = 1, targetW = 1, targetH = 1 } = {}) {
+    const items = blocks.filter((g) => g.count > 0);
+    if (items.length === 0) return { width: 0, height: 0, groups: blocks };
+    // Tallest first, then widest, then input order (explicit tie-break).
+    const order = [...items].sort((a, b) => b.rows - a.rows || b.cols - a.cols || a.index - b.index);
+    const minW = Math.max(...items.map((g) => g.cols));
+    const maxW = items.reduce((s, g) => s + g.cols, 0) + gap * (items.length - 1);
+    let best = null;
+    for (let w = minW; w <= maxW; w++) {
+      const r = rgShelfPack(order, w, gap);
+      const score = [Math.max(r.usedW * targetH, r.usedH * targetW), r.usedW * r.usedH, r.usedW];
+      if (best === null || rgLessThan(score, best.score)) best = { score, ...r };
+    }
+    for (const g of items) [g.x, g.y] = best.pos.get(g.index);
+    return { width: best.usedW, height: best.usedH, groups: blocks };
+  }
+  // Row-major dot placement, straight from the shared doc's `cells()` --
+  // the header band lives entirely above row 0 of this (see
+  // renderRecipeGridSvg's y-offset when calling this), so there's nothing
+  // for it to skip here.
+  function rgCells(group) {
+    const out = [];
+    for (let i = 0; i < group.count; i++) {
+      out.push([group.x + (i % group.cols), group.y + Math.floor(i / group.cols)]);
+    }
+    return out;
+  }
+
+  // Every distinct (recipe, workstation) pair unlocked anywhere in this
+  // category, bucketed by workstation family (tier-agnostic, via
+  // workstationRowKeyFor above). A recipe with variants at more than one
+  // station -- e.g. craftable at either a campfire or a stove -- gets one
+  // dot in EACH of those stations' own groups, not just a single
+  // "cheapest" one: this is a workstation census, not a shortest-path.
+  //
+  // Each item also carries `researchTier` -- the RESEARCH bench tier of
+  // whichever node unlocks it (node.area, always ulmStationResearch_*),
+  // a completely different axis from `tier` (the CRAFTING station tier
+  // the recipe itself needs, node.area never enters into that at all).
+  // The two usually move together but don't have to: nothing stops a
+  // tier-1 research node from unlocking a recipe that needs a tier-2
+  // station. A recipe unlocked by more than one node (rare) takes the
+  // lowest research tier among them -- the earliest point it's actually
+  // available, same "cheapest path" spirit as elsewhere in this file.
+  function recipeGridGroups(root) {
+    const nodes = researchTreeGroups.get(root) || [];
+    const recipeNames = new Set();
+    const researchTierByRecipe = new Map(); // name -> lowest 0-based research tier, or null
+    for (const n of nodes) {
+      const t = tierOf(n.area); // "1"/"2"/"3"/"other" -- research bench is always tiered in practice
+      const rTier = t === "other" ? null : Number(t) - 1;
+      for (const rn of researchUnlockedRecipeNames(n)) {
+        recipeNames.add(rn);
+        const prev = researchTierByRecipe.get(rn);
+        if (prev === undefined || (rTier !== null && (prev === null || rTier < prev))) {
+          researchTierByRecipe.set(rn, rTier);
+        }
+      }
+    }
+    const groups = new Map(); // rowKey -> { key, label, tiered, items: [{name, tier, researchTier}] }
+    for (const name of recipeNames) {
       const areas = new Set();
-      for (const rn of recipeNames) {
-        for (const rid of data.recipesByName[rn]) areas.add(data.recipes[rid].area || null);
+      for (const rid of data.recipesByName[name]) areas.add(data.recipes[rid].area || null);
+      const researchTier = researchTierByRecipe.get(name) ?? null;
+      for (const area of areas) {
+        const rowInfo = workstationRowKeyFor(area);
+        const tier = rowInfo.tiered ? tierInfo[area].tierIndex : null;
+        if (!groups.has(rowInfo.key)) {
+          groups.set(rowInfo.key, { key: rowInfo.key, label: rowInfo.label, tiered: rowInfo.tiered, items: [] });
+        }
+        groups.get(rowInfo.key).items.push({ name, tier, researchTier });
       }
-      const area = primaryAreaFor(areas);
-      const rowInfo = workstationRowKeyFor(area);
-      const col = rowInfo.tiered ? tierInfo[area].tierIndex : 0;
-      resolved.set(name, { rowKey: rowInfo.key, rowLabel: rowInfo.label, tiered: rowInfo.tiered, col });
     }
-    const rows = new Map();
-    for (const [name, info] of resolved) {
-      if (!rows.has(info.rowKey)) rows.set(info.rowKey, { label: info.rowLabel, tiered: info.tiered, cells: new Map() });
-      const cells = rows.get(info.rowKey).cells;
-      if (!cells.has(info.col)) cells.set(info.col, []);
-      cells.get(info.col).push(name);
-    }
-    return { resolved, rows };
+    return [...groups.values()].sort((a, b) => b.items.length - a.items.length);
   }
 
-  const WT_NODE_SPACING_X = 24;
+  const RG_CELL = 24;
+  const RG_DOT_R = 9;
+  const RG_LEFT = 20;
+  const RG_TOP = 20;
+  const RG_MIN_BLOCK_COLS = 3; // header's own minimum width floor
+  const RG_LABEL_ICON_GAP = 6; // px between the icon and the title text
+  // Deliberately smaller than RG_CELL: the label names a whole block of
+  // icons, not one, so it should read as secondary to them (see the
+  // "scale of the workstation name" feedback that shrank this from 13 to
+  // 11). Must match .rgrid-label text's own font-size in styles.css --
+  // width is measured against this exact font, not just eyeballed.
+  const RG_LABEL_FONT_SIZE = 11;
+  const RG_LABEL_FONT = `${RG_LABEL_FONT_SIZE}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
 
-  // Lays out one cell's worth of research nodes: an edge only exists
-  // between a parent and child that resolved to this exact same cell (see
-  // buildWorkstationTreeData) -- everything else becomes its own
-  // disconnected local root, positioned by a simple bottom-up pass (a leaf
-  // gets the next free lane, a parent centers over its own children) that
-  // guarantees no two branches in this cell ever cross. Positions are
-  // relative to this cell's own x=0 -- centering into its column happens
-  // separately once every cell's width is known (see renderWorkstationTreeSvg).
-  function layoutWorkstationCell(names, resolved) {
-    const n = names.length;
-    if (!n) return { maxDepth: -1, minX: 0, maxX: 0, items: [] };
-    const indexOf = new Map(names.map((nm, i) => [nm, i]));
-    const parentIdx = names.map((nm) => {
-      const p = data.research[nm].parent;
-      if (!p || !indexOf.has(p)) return null;
-      const pInfo = resolved.get(p);
-      const nInfo = resolved.get(nm);
-      if (!pInfo || !nInfo || pInfo.rowKey !== nInfo.rowKey || pInfo.col !== nInfo.col) return null;
-      return indexOf.get(p);
+  let rgMeasureCtx = null;
+  function rgMeasureTextWidth(text) {
+    if (!rgMeasureCtx) rgMeasureCtx = document.createElement("canvas").getContext("2d");
+    rgMeasureCtx.font = RG_LABEL_FONT;
+    return rgMeasureCtx.measureText(text).width;
+  }
+
+  // Shapes one block: a header band (icon + title, single line, left-
+  // aligned) stacked directly above a plain dot grid -- they never share a
+  // row. The header is always exactly one grid row tall, same height as
+  // its own icon, never taller no matter how long the name is -- a long
+  // title instead makes the BLOCK WIDER (its minimum width grows to fit
+  // the title on that one line), trading width for a consistent, never-
+  // awkward header height instead of wrapping into extra rows.
+  //
+  // When the workstation has no resolvable icon (Backpack, or a station
+  // missing from the icon set -- see recipeGridGroups), that icon node +
+  // gap is dropped from the width measurement entirely rather than left
+  // as blank space.
+  //
+  // `cols` is whichever is wider: the near-square shape rgBlockShape picks
+  // for the dot count alone, or the header's own minimum width (icon + gap
+  // + the full title, rounded up to whole columns, floored at
+  // RG_MIN_BLOCK_COLS). `rows` is the header's one row plus however many
+  // rows that many dots need at that final `cols` (recomputed directly,
+  // not trusted from rgBlockShape's own row count, since growing `cols` to
+  // fit the header can leave rgBlockShape's original row count too
+  // generous).
+  function rgShapeGroup(count, title, hasIcon) {
+    const iconPx = hasIcon ? RG_CELL + RG_LABEL_ICON_GAP : 0;
+    const headerMinCols = Math.max(RG_MIN_BLOCK_COLS, Math.ceil((iconPx + rgMeasureTextWidth(title)) / RG_CELL));
+
+    const [, dotCols] = rgBlockShape(count);
+    const cols = Math.max(dotCols, headerMinCols);
+    const dotRows = Math.ceil(count / cols);
+    const headerRows = 1;
+
+    return { rows: headerRows + dotRows, cols, headerRows };
+  }
+
+  function renderRecipeGridSvg(root) {
+    const groups = recipeGridGroups(root);
+    if (!groups.length) return `<div class="req-flag-dim">No recipes unlocked in this category.</div>`;
+
+    // Backpack has no station icon at all (see recipeGridGroups); any other
+    // group falls back to whatever data.icons resolves for it -- null for
+    // the rare station missing from the icon set (e.g. the stove), same
+    // treatment as Backpack rather than a broken-looking gap.
+    const icons = groups.map((g) => (g.key === "__backpack__" ? null : iconFor(workstationDisplayKeyFor(g.key))));
+    // The header icon gets the same ring/fill treatment as a recipe dot:
+    // ring = whether this is a tiered family at all (it always shows that
+    // family's OWN tier-1 icon -- see workstationRowKeyFor -- so "tier 1"
+    // is the only ring value a tiered family could ever have here; a
+    // non-tiered/always-available station rings "unlocked", same as its
+    // own recipes do); fill = the research tier that unlocks BUILDING this
+    // station in the first place (reportEngine.findResearchFor resolves a
+    // block name back to whichever node's <unlocks> names it), a genuinely
+    // different piece of information from any one recipe's own research
+    // tier. Backpack isn't a placeable/craftable station, so there's
+    // nothing to look up for it.
+    const headerBuildResearchTiers = groups.map((g) => {
+      if (g.key === "__backpack__") return null;
+      const node = reportEngine.findResearchFor(workstationDisplayKeyFor(g.key));
+      if (!node) return null;
+      const t = tierOf(node.area);
+      return t === "other" ? null : Number(t) - 1;
     });
-    const children = names.map(() => []);
-    parentIdx.forEach((p, i) => {
-      if (p !== null) children[p].push(i);
-    });
-    const depth = new Array(n).fill(-1);
-    function depthOf(i) {
-      if (depth[i] !== -1) return depth[i];
-      depth[i] = parentIdx[i] === null ? 0 : depthOf(parentIdx[i]) + 1;
-      return depth[i];
-    }
-    for (let i = 0; i < n; i++) depthOf(i);
-    let nextSlot = 0;
-    const x = new Array(n);
-    function visit(i) {
-      const kids = children[i];
-      if (!kids.length) {
-        x[i] = nextSlot * WT_NODE_SPACING_X;
-        nextSlot++;
-        return x[i];
-      }
-      let sum = 0;
-      kids.forEach((c) => (sum += visit(c)));
-      x[i] = sum / kids.length;
-      return x[i];
-    }
-    for (let i = 0; i < n; i++) if (parentIdx[i] === null) visit(i);
-    const items = names.map((nm, i) => ({ name: nm, x: x[i], depth: depth[i], parent: parentIdx[i] }));
-    return { maxDepth: Math.max(...depth), minX: Math.min(...x), maxX: Math.max(...x), items };
-  }
+    // Just the name -- the dots themselves already show the count visually,
+    // repeating it as text would be redundant.
+    const shapes = groups.map((g, i) => rgShapeGroup(g.items.length, g.label, !!icons[i]));
+    const blocks = groups.map((g, i) => ({
+      index: i,
+      count: g.items.length,
+      cols: shapes[i].cols,
+      rows: shapes[i].rows,
+      x: 0,
+      y: 0,
+    }));
+    // Targeting a square overall shape (the default, and what the shared
+    // doc itself uses) packs into a roughly 1:1 rectangle regardless of
+    // where it'll actually be displayed -- fine on a square viewport, but
+    // tree-canvas-wrap is a wide modal pane (~1.3:1 or more), so a square
+    // result leaves the fit-to-height view with dead space down both
+    // sides. Targeting the wrap's own live aspect ratio instead packs a
+    // shape that actually fills it. Falls back to a plain square only if
+    // the wrap has no real size yet (shouldn't happen -- this only ever
+    // renders while the modal is already visible).
+    const wrapW = treeCanvasWrapEl.clientWidth || 1;
+    const wrapH = treeCanvasWrapEl.clientHeight || 1;
+    const plan = rgPackBlocks(blocks, { gap: 1, targetW: wrapW, targetH: wrapH });
 
-  // 12 visually distinct colors (the standard palette's mid-ramp stops)
-  // assigned to categories in the same sorted order the category picker
-  // uses -- stable regardless of how the mod's category count changes,
-  // cycling if it ever exceeds 12.
-  const WT_CATEGORY_PALETTE = [
-    "#7F77DD", "#1D9E75", "#D85A30", "#D4537E", "#BA7517", "#378ADD",
-    "#639922", "#E24B4A", "#534AB7", "#0F6E56", "#993C1D", "#993556",
-  ];
-  let wtCategoryColorMap = null;
-  function workstationCategoryColorMap() {
-    if (!wtCategoryColorMap) {
-      wtCategoryColorMap = new Map();
-      researchCategories.forEach((root, i) => {
-        const label = researchCategoryOf(root) || displayName(root);
-        wtCategoryColorMap.set(label, WT_CATEGORY_PALETTE[i % WT_CATEGORY_PALETTE.length]);
-      });
-    }
-    return wtCategoryColorMap;
-  }
-  function workstationNodeColor(name) {
-    const label = researchCategoryOf(name);
-    return (label && workstationCategoryColorMap().get(label)) || "var(--text-dim)";
-  }
-
-  function workstationCategoryLegendHtml() {
-    const map = workstationCategoryColorMap();
-    return [...map.entries()]
-      .map(
-        ([label, color]) =>
-          `<span class="tree-legend-item"><span class="tree-legend-swatch" style="border-color:${color};background:${color}"></span>${label}</span>`
-      )
-      .join("");
-  }
-
-  const WT_LEFT_MARGIN = 220;
-  const WT_TOP_PAD = 24;
-  const WT_NODE_SPACING_Y = 34;
-  const WT_ROW_PAD = 16;
-  const WT_ROW_GAP = 16;
-  const WT_HEADER_H = 34;
-  const WT_SECTION_GAP = 40;
-  const WT_ROW_ICON = 22;
-  const WT_COL_ICON = 16;
-  const WT_MIN_COL_WIDTH = 140;
-  const WT_CELL_PAD = 50;
-
-  function renderWorkstationTreeSvg() {
-    const { resolved, rows } = buildWorkstationTreeData();
-    const totalCount = (row) => [...row.cells.values()].reduce((s, arr) => s + arr.length, 0);
-
-    const spanRows = [];
-    const tieredRows = [];
-    for (const [key, row] of rows) {
-      const cellLayouts = new Map();
-      for (const [col, names] of row.cells) cellLayouts.set(col, layoutWorkstationCell(names, resolved));
-      const entry = { key, label: row.label, tiered: row.tiered, cellLayouts, count: totalCount(row) };
-      (row.tiered ? tieredRows : spanRows).push(entry);
-    }
-    spanRows.sort((a, b) => b.count - a.count);
-    tieredRows.sort((a, b) => b.count - a.count);
-
-    const maxTierCols = tieredRows.reduce(
-      (m, row) => Math.max(m, ...[...row.cellLayouts.keys()].map((c) => c + 1)),
-      1
-    );
-
-    let colContentWidth = 0;
-    tieredRows.forEach((row) => {
-      row.cellLayouts.forEach((cl) => {
-        colContentWidth = Math.max(colContentWidth, cl.maxX - cl.minX);
-      });
-    });
-    let spanContentWidth = 0;
-    spanRows.forEach((row) => {
-      row.cellLayouts.forEach((cl) => {
-        spanContentWidth = Math.max(spanContentWidth, cl.maxX - cl.minX);
-      });
-    });
-    const colWidth = Math.max(WT_MIN_COL_WIDTH, colContentWidth + WT_CELL_PAD);
-    const usableWidth = Math.max(colWidth * maxTierCols, spanContentWidth + WT_CELL_PAD);
-    const colCenters = Array.from({ length: maxTierCols }, (_, i) => WT_LEFT_MARGIN + colWidth * (i + 0.5));
-    const spanCenter = WT_LEFT_MARGIN + usableWidth / 2;
-    const totalWidth = WT_LEFT_MARGIN + usableWidth + 40;
-
-    function place(row, centers) {
-      let maxDepth = -1;
-      const placedCells = new Map();
-      row.cellLayouts.forEach((cl, col) => {
-        maxDepth = Math.max(maxDepth, cl.maxDepth);
-        const offset = centers[col] - (cl.minX + cl.maxX) / 2;
-        placedCells.set(
-          col,
-          cl.items.map((it) => ({ ...it, x: it.x + offset }))
-        );
-      });
-      const height = (maxDepth + 1) * WT_NODE_SPACING_Y + WT_ROW_PAD * 2;
-      return { ...row, placedCells, height };
-    }
-    const placedSpanRows = spanRows.map((row) => place(row, { 0: spanCenter }));
-    const placedTieredRows = tieredRows.map((row) => place(row, colCenters));
-
-    let edgesHtml = "";
     let nodesHtml = "";
-    let headersHtml = "";
-    let dividersHtml = "";
-    let rowLabelsHtml = "";
-    let bgHtml = "";
-
-    let cursorY = WT_TOP_PAD;
-    const sections = [
-      { mode: "single", header: "no tier", rows: placedSpanRows },
-      { mode: "columns", header: null, rows: placedTieredRows },
-    ].filter((s) => s.rows.length);
-
-    sections.forEach((section, si) => {
-      const sectionTop = cursorY;
-      const contentHeight = section.rows.reduce((s, r) => s + r.height, 0) + WT_ROW_GAP * Math.max(0, section.rows.length - 1);
-      const sectionHeight = WT_HEADER_H + contentHeight;
-
-      if (si === 0) {
-        bgHtml += `<rect class="wtree-section-bg" x="${WT_LEFT_MARGIN - 16}" y="${sectionTop}" width="${usableWidth + 32}" height="${sectionHeight}"/>`;
-      }
-
-      if (section.mode === "single") {
-        headersHtml += `<text class="wtree-header" x="${spanCenter}" y="${sectionTop + WT_HEADER_H - 12}" text-anchor="middle">${section.header}</text>`;
-      } else {
-        colCenters.forEach((cx, i) => {
-          headersHtml += `<text class="wtree-header" x="${cx}" y="${sectionTop + WT_HEADER_H - 12}" text-anchor="middle">tier ${i + 1}</text>`;
-        });
-      }
-
-      let rowY = sectionTop + WT_HEADER_H;
-      section.rows.forEach((row) => {
-        if (section.mode === "columns") {
-          for (let i = 1; i < maxTierCols; i++) {
-            const x = WT_LEFT_MARGIN + colWidth * i;
-            dividersHtml += `<line class="wtree-divider" x1="${x}" y1="${rowY}" x2="${x}" y2="${rowY + row.height}"/>`;
-          }
+    let labelsHtml = "";
+    plan.groups.forEach((g, gi) => {
+      if (!g.count) return;
+      const group = groups[gi];
+      const shape = shapes[gi];
+      // Sorted ascending (unlocked/no-tier last) by whichever tier axis is
+      // currently selected (see the sort toggle/setRecipeSort) -- fills row
+      // by row, so the block reads that axis's tier 1 at the top down to
+      // tier 3 at the bottom. Switching to "research tier" is what surfaces
+      // a recipe you can research early but that needs a high workstation
+      // tier: it floats to the top of the block while its ring still shows
+      // the (high) station tier it actually needs, instead of blending in
+      // sorted by that same station tier.
+      const sortKey = treeState.recipeSort === "research" ? "researchTier" : "tier";
+      const sortedItems = [...group.items].sort(
+        (a, b) => (a[sortKey] === null ? 99 : a[sortKey]) - (b[sortKey] === null ? 99 : b[sortKey])
+      );
+      // Dots start right below the header band, never inside it -- see
+      // rgShapeGroup/the header comment above for why.
+      const pts = rgCells({ ...g, y: g.y + shape.headerRows });
+      pts.forEach(([cx, cy], i) => {
+        const item = sortedItems[i];
+        // Ring: same tier-color convention as the research tree's own
+        // nodes (.tree-node-tier-N/-unlocked, reused directly) -- the
+        // CRAFTING station tier this specific recipe needs. item.tier is
+        // 0-based (0..2) here, those classes are 1-based (tier 1..3).
+        const tierCls = item.tier === null ? "tree-node-unlocked" : `tree-node-tier-${item.tier + 1}`;
+        // Fill: a separate, subtle tint for the RESEARCH bench tier that
+        // unlocked it -- a different axis from the ring (see
+        // recipeGridGroups), so it gets its own class rather than
+        // overloading tierCls.
+        const researchTierCls =
+          item.researchTier === null ? "rgrid-fill-tier-none" : `rgrid-fill-tier-${item.researchTier}`;
+        const recipeIcon = iconFor(item.name);
+        const x = (RG_LEFT + cx * RG_CELL + RG_CELL / 2).toFixed(1);
+        const y = (RG_TOP + cy * RG_CELL + RG_CELL / 2).toFixed(1);
+        nodesHtml += `<g class="tree-node rgrid-node ${tierCls} ${researchTierCls}" data-name="${item.name}" transform="translate(${x},${y})">`;
+        nodesHtml += `<circle r="${RG_DOT_R}"/>`;
+        if (recipeIcon) {
+          nodesHtml += `<image href="${recipeIcon}" x="${(-RG_DOT_R * 0.7).toFixed(1)}" y="${(-RG_DOT_R * 0.7).toFixed(1)}" width="${(RG_DOT_R * 1.4).toFixed(1)}" height="${(RG_DOT_R * 1.4).toFixed(1)}"/>`;
         }
-
-        const rowIcon = row.key === "__backpack__" ? null : iconFor(row.key);
-        const labelY = rowY + row.height / 2;
-        rowLabelsHtml += `<g class="wtree-row-label" transform="translate(${WT_LEFT_MARGIN - 28},${labelY})">`;
-        if (rowIcon) {
-          rowLabelsHtml += `<image href="${rowIcon}" x="${-WT_ROW_ICON - 6}" y="${-WT_ROW_ICON / 2}" width="${WT_ROW_ICON}" height="${WT_ROW_ICON}"/>`;
-        }
-        rowLabelsHtml += `<text x="0" y="4" text-anchor="end">${row.label}</text></g>`;
-
-        if (section.mode === "columns" && row.tiered) {
-          const familyTiers = tierInfo[row.key].familyTiers;
-          row.placedCells.forEach((items, col) => {
-            const tierBlock = familyTiers[col];
-            const icon = tierBlock ? iconFor(tierBlock) : null;
-            if (icon) {
-              const cx = colCenters[col];
-              nodesHtml += `<image class="wtree-col-icon" href="${icon}" x="${cx - WT_COL_ICON / 2}" y="${rowY + 2}" width="${WT_COL_ICON}" height="${WT_COL_ICON}"/>`;
-            }
-          });
-        }
-
-        row.placedCells.forEach((items) => {
-          items.forEach((it) => {
-            it.cy = rowY + WT_ROW_PAD + it.depth * WT_NODE_SPACING_Y + (section.mode === "columns" ? 20 : 6);
-          });
-          items.forEach((it) => {
-            if (it.parent === null) return;
-            const parentItem = items[it.parent];
-            edgesHtml += `<line class="wtree-edge" x1="${parentItem.x.toFixed(1)}" y1="${parentItem.cy.toFixed(1)}" x2="${it.x.toFixed(1)}" y2="${it.cy.toFixed(1)}" stroke="${workstationNodeColor(it.name)}"/>`;
-          });
-          items.forEach((it) => {
-            const r = it.parent === null ? 7 : 5;
-            nodesHtml +=
-              `<g class="tree-node wtree-node" data-name="${it.name}" transform="translate(${it.x.toFixed(1)},${it.cy.toFixed(1)})">` +
-              `<circle r="${r}" fill="${workstationNodeColor(it.name)}"/></g>`;
-          });
-        });
-
-        rowY += row.height + WT_ROW_GAP;
+        nodesHtml += `</g>`;
       });
 
-      cursorY = sectionTop + sectionHeight;
-      if (si < sections.length - 1) {
-        const dividerY = cursorY + WT_SECTION_GAP / 2;
-        dividersHtml += `<line class="wtree-section-divider" x1="${WT_LEFT_MARGIN - 16}" y1="${dividerY}" x2="${WT_LEFT_MARGIN + usableWidth + 16}" y2="${dividerY}"/>`;
-        cursorY += WT_SECTION_GAP;
+      // Header band: top-left of the block, icon then title -- own reserved
+      // rows the dot grid below never shares. When there's no resolvable
+      // icon, the title starts right at the block's own left edge instead
+      // of leaving a blank gap where the icon would have sat (rgShapeGroup
+      // already dropped that space from every measurement to match).
+      const icon = icons[gi];
+      const blockX0 = RG_LEFT + g.x * RG_CELL;
+      const labelTopY = RG_TOP + g.y * RG_CELL;
+      labelsHtml += `<g class="rgrid-label">`;
+      if (icon) {
+        // Same ring/fill treatment as a recipe dot -- see the
+        // headerBuildResearchTiers comment above for what each one means
+        // here. rgrid-label-icon-bg still supplies the base panel-alt
+        // fill/neutral border as a fallback; these classes' higher
+        // selector specificity (class+element vs. this circle's own single
+        // class) overrides both once applied, same as it does for a dot.
+        const ringCls = group.tiered ? "tree-node-tier-1" : "tree-node-unlocked";
+        const buildResearchTier = headerBuildResearchTiers[gi];
+        const fillCls = buildResearchTier === null ? "rgrid-fill-tier-none" : `rgrid-fill-tier-${buildResearchTier}`;
+        const iconR = RG_CELL / 2 - 1;
+        const iconCx = blockX0 + RG_CELL / 2;
+        const iconCy = labelTopY + RG_CELL / 2;
+        labelsHtml += `<g class="${ringCls} ${fillCls}" transform="translate(${iconCx.toFixed(1)},${iconCy.toFixed(1)})">`;
+        labelsHtml += `<circle class="rgrid-label-icon-bg" r="${iconR}"/>`;
+        labelsHtml += `<image href="${icon}" x="${(-iconR * 0.8).toFixed(1)}" y="${(-iconR * 0.8).toFixed(1)}" width="${(iconR * 1.6).toFixed(1)}" height="${(iconR * 1.6).toFixed(1)}"/>`;
+        labelsHtml += `</g>`;
       }
+      const titleX = (icon ? blockX0 + RG_CELL + RG_LABEL_ICON_GAP : blockX0).toFixed(1);
+      // Vertically centered in the header row, same as the icon: baseline
+      // sits a bit below the row's own midline by roughly a cap-height, the
+      // usual approximation for centering a single line of text in a box.
+      const baselineY = (labelTopY + RG_CELL / 2 + RG_LABEL_FONT_SIZE * 0.35).toFixed(1);
+      labelsHtml += `<text x="${titleX}" y="${baselineY}">${group.label}</text></g>`;
     });
 
-    const totalHeight = cursorY + 20;
+    const totalWidth = RG_LEFT * 2 + plan.width * RG_CELL;
+    const totalHeight = RG_TOP * 2 + plan.height * RG_CELL;
     return (
       `<svg class="tree-svg" viewBox="0 0 ${totalWidth} ${totalHeight}" width="${totalWidth}" height="${totalHeight}">` +
-      bgHtml + dividersHtml + headersHtml + rowLabelsHtml +
-      `<g class="tree-edges">${edgesHtml}</g><g class="tree-nodes">${nodesHtml}</g></svg>`
+      `<g class="tree-nodes">${nodesHtml}</g>${labelsHtml}</svg>`
     );
   }
 
-  const treeState = { root: null, mode: "category" };
+  // recipeSort only matters in "recipes" mode: "tier" (workstation tier,
+  // the default) or "research" (research bench tier) -- see the sort
+  // toggle wiring and renderRecipeGridSvg's sort of each block's items.
+  const treeState = { root: null, mode: "tree", recipeSort: "tier" };
   // Pan/zoom is plain CSS transform on tree-canvas-inner, driven entirely
   // from here -- .tree-canvas-wrap has no native scrollbars (overflow:
   // hidden) so this is the only way to navigate a tree bigger than the
@@ -1152,16 +1214,24 @@ window.ULModBuddyApp = (function () {
     treeCanvasWrapEl.scrollLeft = 0;
   }
 
-  // Default view: the whole tree fit to the viewport's width (never
-  // upscaled past 1x for a tree that's already smaller than the viewport).
+  // Default view: the whole tree/grid fit to the viewport on WHICHEVER
+  // axis is more constraining (width or height), upscaled past 1x when
+  // the content is smaller than the viewport on both -- capped at
+  // clampTreeScale's usual 5x ceiling, same as manual zoom, rather than
+  // hard-capped at 1x. That 1x cap made sense back when this only ever
+  // fit the research tree (almost always bigger than the viewport, so it
+  // rarely mattered) but left the much smaller recipe grid stranded tiny
+  // in the middle of a wide, mostly-empty modal for most categories,
+  // never actually filling the space "Fit" implies it should.
   // x/y just need a starting value here -- clampTreePan() (inside
   // applyTreeTransform) does the actual centering/bounding. Re-run every
   // time the modal opens, not just on first render, so a window resize
   // while it was closed doesn't leave a stale fit.
   function fitTreeView() {
     const wrapW = treeCanvasWrapEl.clientWidth;
-    if (!treeNaturalWidth || !wrapW) return;
-    treeView.scale = clampTreeScale(Math.min(wrapW / treeNaturalWidth, 1));
+    const wrapH = treeCanvasWrapEl.clientHeight;
+    if (!treeNaturalWidth || !treeNaturalHeight || !wrapW || !wrapH) return;
+    treeView.scale = clampTreeScale(Math.min(wrapW / treeNaturalWidth, wrapH / treeNaturalHeight));
     treeView.x = 0;
     treeView.y = 0;
     applyTreeTransform();
@@ -1185,30 +1255,45 @@ window.ULModBuddyApp = (function () {
   function renderTreeCanvas() {
     hideTreeNodeTooltip();
     treeCanvasInnerEl.innerHTML =
-      treeState.mode === "workstation" ? renderWorkstationTreeSvg() : renderResearchTreeSvg(treeState.root);
+      treeState.mode === "recipes" ? renderRecipeGridSvg(treeState.root) : renderResearchTreeSvg(treeState.root);
     const svg = treeCanvasInnerEl.querySelector("svg");
     treeNaturalWidth = svg ? parseFloat(svg.getAttribute("width")) || 0 : 0;
     treeNaturalHeight = svg ? parseFloat(svg.getAttribute("height")) || 0 : 0;
     fitTreeView();
   }
 
-  // Two independent lenses on the same 589 research nodes: by category
-  // (renderResearchTreeSvg, tier shown as a ring color) or by the crafting
-  // workstation each node's own unlock actually requires
-  // (renderWorkstationTreeSvg, tier shown as a real column) -- see that
-  // function for why these are genuinely different groupings, not just a
-  // different picker over the same tree. Only one is ever wired up.
+  // Two lenses on one category at a time, picked with the same category
+  // dropdown (always visible, not toggled by mode): the connected research
+  // tree (renderResearchTreeSvg, tier shown as a ring color) or the recipe
+  // grid (renderRecipeGridSvg, tier shown as dot color).
   function setTreeMode(mode) {
     if (treeState.mode === mode) return;
     treeState.mode = mode;
-    treeModeCategoryBtnEl.setAttribute("aria-pressed", String(mode === "category"));
-    treeModeWorkstationBtnEl.setAttribute("aria-pressed", String(mode === "workstation"));
-    treeCategoryFieldEl.hidden = mode !== "category";
-    treeTierLegendEl.hidden = mode !== "category";
-    treeWorkstationLegendEl.hidden = mode !== "workstation";
-    if (mode === "workstation" && !treeWorkstationLegendEl.children.length) {
-      treeWorkstationLegendEl.innerHTML = workstationCategoryLegendHtml();
-    }
+    treeModeTreeBtnEl.setAttribute("aria-pressed", String(mode === "tree"));
+    treeModeRecipesBtnEl.setAttribute("aria-pressed", String(mode === "recipes"));
+    // Recipe grid dots carry a second, independent tier signal (the subtle
+    // background fill -- see recipeGridGroups/renderRecipeGridSvg) that
+    // the research tree's own nodes don't have at all, so the legend only
+    // explains ring-vs-fill in that mode.
+    treeTierLegendEl.classList.toggle("tree-legend-mode-recipes", mode === "recipes");
+    // Sort order only means anything for the recipe grid's own per-block
+    // dot layout -- the research tree has no equivalent concept.
+    treeSortToggleEl.hidden = mode !== "recipes";
+    renderTreeCanvas();
+  }
+
+  // Which tier axis orders the dots within each recipe-grid block --
+  // "tier" (workstation, the default) or "research" (research bench).
+  // Switching to research tier is what surfaces a recipe you can research
+  // early that still needs a high-tier workstation: sorted by research
+  // tier, it floats toward the top of its block while its ring still shows
+  // the (high) station tier, instead of sinking to the bottom sorted by
+  // that same station tier.
+  function setRecipeSort(sortBy) {
+    if (treeState.recipeSort === sortBy) return;
+    treeState.recipeSort = sortBy;
+    treeSortTierBtnEl.setAttribute("aria-pressed", String(sortBy === "tier"));
+    treeSortResearchBtnEl.setAttribute("aria-pressed", String(sortBy === "research"));
     renderTreeCanvas();
   }
 
@@ -1275,13 +1360,14 @@ window.ULModBuddyApp = (function () {
     // Shown before selecting/fitting -- fitTreeView() needs the wrap's real
     // (non-zero) on-screen size, which a `hidden` element doesn't have.
     treeModalEl.hidden = false;
-    if (treeState.mode === "workstation") renderTreeCanvas();
-    else if (!treeState.root) selectTreeCategory(researchCategories[0]);
+    if (!treeState.root) selectTreeCategory(researchCategories[0]);
     else fitTreeView();
   }
 
-  treeModeCategoryBtnEl.addEventListener("click", () => setTreeMode("category"));
-  treeModeWorkstationBtnEl.addEventListener("click", () => setTreeMode("workstation"));
+  treeModeTreeBtnEl.addEventListener("click", () => setTreeMode("tree"));
+  treeModeRecipesBtnEl.addEventListener("click", () => setTreeMode("recipes"));
+  treeSortTierBtnEl.addEventListener("click", () => setRecipeSort("tier"));
+  treeSortResearchBtnEl.addEventListener("click", () => setRecipeSort("research"));
 
   treeBtnEl.addEventListener("click", openTreeModal);
   treeModalCloseEl.addEventListener("click", hideTreeModal);
@@ -1399,6 +1485,24 @@ window.ULModBuddyApp = (function () {
     treeNodeTooltipEl.hidden = true;
   }
 
+  // Positioned in viewport coordinates (position: fixed), centered above
+  // the node and flipped below when there's no room, clamped to the canvas
+  // wrap's own bounds -- getBoundingClientRect() already accounts for the
+  // pan/zoom transform on tree-canvas-inner, so no separate
+  // unproject-from-SVG-space math is needed here. Shared by both tooltip
+  // flavors below -- only the content they put in treeNodeTooltipEl differs.
+  function positionTreeNodeTooltip(nodeEl) {
+    const nodeRect = nodeEl.getBoundingClientRect();
+    const wrapRect = treeCanvasWrapEl.getBoundingClientRect();
+    const ttRect = treeNodeTooltipEl.getBoundingClientRect();
+    let left = nodeRect.left + nodeRect.width / 2 - ttRect.width / 2;
+    let top = nodeRect.top - ttRect.height - 10;
+    if (top < wrapRect.top) top = nodeRect.bottom + 10;
+    left = Math.max(wrapRect.left + 4, Math.min(left, wrapRect.right - ttRect.width - 4));
+    treeNodeTooltipEl.style.left = `${left}px`;
+    treeNodeTooltipEl.style.top = `${top}px`;
+  }
+
   function showTreeNodeTooltip(nodeEl) {
     const node = data.research[nodeEl.dataset.name];
     const unlockedRecipes = node ? researchUnlockedRecipeNames(node) : [];
@@ -1414,26 +1518,25 @@ window.ULModBuddyApp = (function () {
       .map((n) => `<div class="tree-node-tooltip-item">${reportRowIcon(n, "tree-node-tooltip-icon")}<span>${displayName(n)}</span></div>`)
       .join("");
     treeNodeTooltipEl.hidden = false;
-    // Positioned in viewport coordinates (position: fixed), centered above
-    // the node and flipped below when there's no room, clamped to the
-    // canvas wrap's own bounds -- getBoundingClientRect() already accounts
-    // for the pan/zoom transform on tree-canvas-inner, so no separate
-    // unproject-from-SVG-space math is needed here.
-    const nodeRect = nodeEl.getBoundingClientRect();
-    const wrapRect = treeCanvasWrapEl.getBoundingClientRect();
-    const ttRect = treeNodeTooltipEl.getBoundingClientRect();
-    let left = nodeRect.left + nodeRect.width / 2 - ttRect.width / 2;
-    let top = nodeRect.top - ttRect.height - 10;
-    if (top < wrapRect.top) top = nodeRect.bottom + 10;
-    left = Math.max(wrapRect.left + 4, Math.min(left, wrapRect.right - ttRect.width - 4));
-    treeNodeTooltipEl.style.left = `${left}px`;
-    treeNodeTooltipEl.style.top = `${top}px`;
+    positionTreeNodeTooltip(nodeEl);
+  }
+
+  // Recipe grid dots are recipes, not research nodes -- there's no
+  // "unlocks" list to show, just the one recipe itself.
+  function showRecipeDotTooltip(nodeEl) {
+    const name = nodeEl.dataset.name;
+    treeNodeTooltipEl.innerHTML =
+      `<div class="tree-node-tooltip-item">${reportRowIcon(name, "tree-node-tooltip-icon")}<span>${displayName(name)}</span></div>`;
+    treeNodeTooltipEl.hidden = false;
+    positionTreeNodeTooltip(nodeEl);
   }
 
   treeCanvasWrapEl.addEventListener("mouseover", (e) => {
     if (treeDragging) return;
     const nodeEl = e.target.closest(".tree-node");
-    if (nodeEl) showTreeNodeTooltip(nodeEl);
+    if (!nodeEl) return;
+    if (nodeEl.classList.contains("rgrid-node")) showRecipeDotTooltip(nodeEl);
+    else showTreeNodeTooltip(nodeEl);
   });
   treeCanvasWrapEl.addEventListener("mouseout", (e) => {
     const nodeEl = e.target.closest(".tree-node");

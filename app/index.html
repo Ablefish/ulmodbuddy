@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>UL Mod Buddy</title>
-<link rel="stylesheet" href="styles.css?dev=28">
+<link rel="stylesheet" href="styles.css?dev=31">
 </head>
 <body>
 <header>
@@ -62,10 +62,6 @@
     </div>
     <div class="modal-body">
       <div class="tree-controls">
-        <div class="tree-mode-toggle" id="tree-mode-toggle" role="group" aria-label="Research tree view">
-          <button type="button" class="tree-mode-btn" id="tree-mode-category" aria-pressed="true">By category</button>
-          <button type="button" class="tree-mode-btn" id="tree-mode-workstation" aria-pressed="false">By workstation</button>
-        </div>
         <div class="icon-select-field" id="tree-category-field">
           <span class="icon-select-field-label">Category:</span>
           <div class="icon-select" id="tree-category-select">
@@ -77,13 +73,22 @@
             <div class="icon-select-menu" id="tree-category-menu" role="listbox" tabindex="-1" hidden></div>
           </div>
         </div>
+        <div class="tree-mode-toggle" id="tree-mode-toggle" role="group" aria-label="Research tree view">
+          <button type="button" class="tree-mode-btn" id="tree-mode-tree" aria-pressed="true">Research tree</button>
+          <button type="button" class="tree-mode-btn" id="tree-mode-recipes" aria-pressed="false">Recipe grid</button>
+        </div>
+        <div class="tree-mode-toggle" id="tree-sort-toggle" role="group" aria-label="Recipe sort order" hidden>
+          <button type="button" class="tree-mode-btn" id="tree-sort-tier" aria-pressed="true">Sort: workstation tier</button>
+          <button type="button" class="tree-mode-btn" id="tree-sort-research" aria-pressed="false">Sort: research tier</button>
+        </div>
         <div class="tree-legend" id="tree-tier-legend">
           <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-1"></span>Tier 1</span>
           <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-2"></span>Tier 2</span>
           <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-3"></span>Tier 3</span>
           <span class="tree-legend-item"><span class="tree-legend-swatch tree-legend-tier-unlocked"></span>Unlocked by default</span>
+          <span class="tree-legend-item tree-legend-recipe-only"><span class="tree-legend-swatch tree-legend-tier-2"></span>Ring: workstation tier</span>
+          <span class="tree-legend-item tree-legend-recipe-only"><span class="tree-legend-swatch tree-legend-fill-tier-2"></span>Fill: research tier</span>
         </div>
-        <div class="tree-legend" id="tree-workstation-legend" hidden></div>
       </div>
       <div id="tree-canvas-wrap" class="tree-canvas-wrap">
         <div id="tree-canvas-inner" class="tree-canvas-inner"></div>
@@ -142,7 +147,7 @@
 <script src="reportEngine.js?dev=5"></script>
 <script src="build.js?dev=8"></script>
 <script src="storage.js?dev=2"></script>
-<script src="app.js?dev=57"></script>
+<script src="app.js?dev=73"></script>
 <script src="setup.js?dev=5"></script>
 </body>
 </html>
