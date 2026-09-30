@@ -3,6 +3,47 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.0] - 2026-09-30
+
+### Added
+
+- **Loot Sources**, a fourth source popup alongside Harvest/Recycle/Scrap --
+  every real container and kill that can drop an item, at a loot stage you
+  pick. The stage buttons land on the actual in-game thresholds where the
+  next weapon/tool/armor tier turns on (10/49/89/129, not an even split),
+  since most gear is gated off entirely below its own tier's stage. The
+  most complex calculation in the app (a chain of independent loot-group
+  gates multiplied together per stage), so treat it as a rough guide to
+  where to look, not verified drop odds.
+- **Recipe grid**, a second Research Tree view next to the existing node
+  map -- toggle it to see every recipe a category unlocks packed into a
+  compact block per workstation, instead of following the tree node by
+  node. Each recipe icon carries two independent tiers at once: a ring for
+  the workstation tier it needs, and a background tint for the research
+  tier that unlocked it -- a Sort toggle re-orders by either axis, and
+  hovering an icon pops up its full ingredient list so two recipes' cost
+  can be compared without opening either.
+- **A Scrap chip**, alongside Harvest/Recycle/Loot, for items obtainable by
+  scrapping something else in your inventory -- Fabric, for instance, now
+  correctly shows it's a Scrap source from 18 different armor pieces, a
+  reverse lookup the build never computed before.
+- The Rebuild data modal now shows **which folder is currently selected**
+  ("Current folder: \<name\>") before you click Rebuild -- useful once you
+  have more than one install folder around.
+
+### Fixed
+
+- **Fabric, Scrap Iron, and dozens of other resources no longer show a
+  phantom "recipe."** The mod defines generic
+  `<wildcard_forge_category/>` salvage templates for a wide range of
+  materials -- the base game's own "salvage anything of this material"
+  crafting-window mechanic, which accepts any matching item at craft time
+  rather than a fixed ingredient list, not a real recipe. The build was
+  loading every one of these as a genuine, zero-ingredient recipe. Scrap
+  Iron -- which had no other recipe at all -- now correctly shows as a
+  plain acquired item; Fabric now shows only its real Tailor's Station
+  recipe instead of a confusing, costless second variant.
+
 ## [1.2.0] - 2026-09-16
 
 ### Added

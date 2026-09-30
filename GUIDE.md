@@ -96,6 +96,28 @@ always where you should actually go looking first.
 
 ![Recycle Sources popup for Iron Plating, showing which items to break down and their yield tiers](docs/screenshots/recycle-sources.png)
 
+## Loot Sources
+
+The fourth clickable chip, **Loot**, opens a different kind of popup --
+every real container and kill that can actually drop the item, at a loot
+stage you pick:
+
+![Loot Sources popup for an item, showing the loot-stage picker and High/Medium/Low Chance sections](docs/screenshots/loot-sources.png)
+
+The **Loot stage** buttons jump straight to the real in-game stages where
+the next weapon/tool/armor tier switches on (not an even 0/50/100/150/200
+split) -- picking a later stage can turn "not obtainable" into a real
+source, since most loot tables are gated off entirely below their own
+tier's threshold. Sources are grouped the same **High / Medium / Low
+Chance** way Harvest/Recycle/Scrap group by yield, with **Found In** and
+**Dropped By** sub-lists under each tier.
+
+This is the single most complex calculation in the app -- a container's
+odds can depend on a whole chain of nested loot-group gates, each one
+checked independently for the stage you picked, multiplied together for
+the combined number shown. Treat it as a rough guide to where to look, not
+verified drop odds.
+
 ## The Research Tree
 
 The **Research Tree** button (header, top right) opens a full visual map
@@ -172,7 +194,10 @@ If you've updated the mod, or reinstalled it to a new location, click
 **Rebuild data** in the header to have the app pick that up.
 
 If you're using the zero-install setup (Chrome or Edge), you get two
-choices:
+choices, with a "Current folder: \<name\>" line above them once one's been
+picked before -- just the folder's own name, since browsers never hand a
+page its full path, but enough to tell two similarly-named install
+folders apart:
 
 ![Rebuild data modal offering "Rebuild from current folder" or "Choose a different folder..."](docs/screenshots/rebuild-data-modal.png)
 
