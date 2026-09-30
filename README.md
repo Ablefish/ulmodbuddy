@@ -10,12 +10,12 @@ mod for *7 Days to Die*, built directly from your own install:
   workstation and expand a cascading, click-to-expand cost tree all the way
   down to raw materials: ingredients, research prerequisites, workstations,
   tools, and every way to acquire each one (Craft / Loot / Buy / Harvest /
-  Recycle / Quest).
+  Recycle / Scrap / Quest).
 - **Opens Into**, **Scraps Into**, and **Recycles Into** -- what a bundle
   or ammo box unpacks into, and what breaking an item down gives back, in
   your inventory or at a Recycler.
-- **Harvest** and **Recycle Sources** -- every source for a given item,
-  ranked by expected yield.
+- **Harvest**, **Recycle**, and **Scrap Sources** -- every source for a
+  given item, ranked by expected yield.
 - **Loot Sources** -- which containers and kills can drop an item, with a
   combined drop-chance estimate at a given loot stage. This is the most
   complex calculation in the app, so treat the numbers as a rough guide,

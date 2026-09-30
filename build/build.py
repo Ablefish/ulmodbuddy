@@ -1457,13 +1457,24 @@ def resolve_scrap_target(forge_category, all_ids):
 
 
 def load_scrap_data(all_names, extends_map):
-    """Returns scrap_yields: {name: {"name": output_name, "count": N}},
-    scoped to `all_names` (the same "does the app ever show this" set icons
-    are resolved for) since there's no value computing this for names the
-    app never displays a detail page for."""
+    """Returns (scrap_yields, scrap_sources):
+      - scrap_yields: {name: {"name": output_name, "count": N}}, scoped to
+        `all_names` (the same "does the app ever show this" set icons are
+        resolved for) since there's no value computing this for names the
+        app never displays a detail page for.
+      - scrap_sources: {output_name: [{"item": name, "countMin", "countMax",
+        "prob", "tier"}, ...]} -- the reverse index (what can I scrap in my
+        inventory to GET this), built and shaped exactly like
+        recycle_sources: same tier-variant collapsing, same expected-yield
+        sort, same high/medium/low bucketing, so it renders through the
+        identical source modal. Scrapping has no probability or count range
+        (always the one fixed count for a given item) -- countMin/countMax/
+        prob are just that count and 1.0, purely to fit the shared shape.
+    """
     forge_categories = load_material_forge_categories()
     props, all_ids = load_material_weight_props()
     scrap_yields = {}
+    scrap_sources = {}
     for nm in all_names:
         material, weight = _resolve_material_weight(nm, props, extends_map)
         if not material or not weight:
@@ -1478,7 +1489,13 @@ def load_scrap_data(all_names, extends_map):
         if count < 1:
             count = 1
         scrap_yields[nm] = {"name": target, "count": count}
-    return scrap_yields
+        scrap_sources.setdefault(target, []).append({
+            "item": nm, "countMin": count, "countMax": count, "prob": 1.0,
+        })
+    for name, sources in scrap_sources.items():
+        scrap_sources[name] = _collapse_tier_variants(sources, key="item")
+    _sort_and_tier_sources(scrap_sources, "item")
+    return scrap_yields, scrap_sources
 
 
 # ---------------------------------------------------------------------------
@@ -2451,8 +2468,10 @@ def main(install_root):
     extends_map, children_map = load_extends_graph()
 
     print("Loading scrap data (Material/Weight -> in-inventory Scrap output)...")
-    scrap_yields = load_scrap_data(all_names, extends_map)
-    print(f"  {len(scrap_yields)} scrappable name(s) resolved")
+    scrap_yields, scrap_sources = load_scrap_data(all_names, extends_map)
+    scrappable = set(scrap_sources.keys())
+    print(f"  {len(scrap_yields)} scrappable name(s) resolved, {len(scrappable)} distinct scrap output(s), "
+          f"{sum(len(v) for v in scrap_sources.values())} source row(s)")
     # Fold scrap output targets into all_names BEFORE icon resolution below --
     # otherwise a target only ever reachable via scrapYields (e.g. a "Parts"
     # item no live recipe references as an ingredient anymore, like
@@ -2552,6 +2571,13 @@ def main(install_root):
         print(f"  collapsed {before - after} look-alike recycle source row(s) "
               f"(same display name/icon/yield under a different internal item name)")
 
+    before = sum(len(v) for v in scrap_sources.values())
+    collapse_source_lookalikes(scrap_sources, names, icons, key="item")
+    after = sum(len(v) for v in scrap_sources.values())
+    if before != after:
+        print(f"  collapsed {before - after} look-alike scrap source row(s) "
+              f"(same display name/icon/yield under a different internal item name)")
+
     # craftable duplicates recipes_by_name membership rather than reading it
     # at the point of use -- so every "how can I get this" question has one
     # place to look (the acquisition map) instead of two.
@@ -2562,7 +2588,7 @@ def main(install_root):
     # workstation block you build and place, never bought/looted/rewarded/
     # harvested/crafted as an item in its own right.
     acquisition = {}
-    for nm in sorted(craftable | harvestable | purchasable | lootable | rewardable | recyclable):
+    for nm in sorted(craftable | harvestable | purchasable | lootable | rewardable | recyclable | scrappable):
         entry = {}
         if nm in craftable:
             entry["craftable"] = True
@@ -2576,6 +2602,8 @@ def main(install_root):
             entry["rewardable"] = True
         if nm in recyclable:
             entry["recyclable"] = True
+        if nm in scrappable:
+            entry["scrappable"] = True
         acquisition[nm] = entry
 
     dataset = {
@@ -2600,6 +2628,8 @@ def main(install_root):
                 "recycleYieldItems": len(recycle_yields),
                 "recycleSourceRows": sum(len(v) for v in recycle_sources.values()),
                 "scrapYieldItems": len(scrap_yields),
+                "scrappable": len(scrappable),
+                "scrapSourceRows": sum(len(v) for v in scrap_sources.values()),
                 "openYieldItems": len(open_yields),
                 "itemMods": len(item_mods),
                 "vehicles": len(vehicles),
@@ -2620,6 +2650,7 @@ def main(install_root):
         "recycleYields": recycle_yields,
         "recycleSources": recycle_sources,
         "scrapYields": scrap_yields,
+        "scrapSources": scrap_sources,
         "openYields": open_yields,
         "itemMods": sorted(item_mods),
         "vehicles": vehicles,

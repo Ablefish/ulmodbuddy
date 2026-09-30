@@ -36,8 +36,9 @@ A few things worth knowing about this page:
   set it to 20 and every ingredient count updates to "what it costs to
   make 20 of these."
 - **The chips next to every ingredient** (Craft / Loot / Buy / Harvest /
-  Recycle / Quest) show every way that item can be obtained. Craft always
-  means "look up its own recipe" -- the other chips are described below.
+  Recycle / Scrap / Quest) show every way that item can be obtained. Craft
+  always means "look up its own recipe" -- the other chips are described
+  below.
 
   ![Close-up of an ingredient row's chips: Recycle, Quest, Harvest, Craft, Loot, Buy](docs/screenshots/chips-all-types.png)
 
@@ -72,11 +73,11 @@ ingredient appearing under three different sub-trees by hand.
 
 ![One-Time Totals panel listing 5 distinct ingredients with combined counts](docs/screenshots/one-time-totals.png)
 
-## Where to find things: Harvest and Recycle sources
+## Where to find things: Harvest, Recycle, and Scrap sources
 
-Two of the chips shown next to an ingredient open a popup instead of
+Three of the chips shown next to an ingredient open a popup instead of
 jumping to another page -- shown filled in solidly (rather than outlined,
-like the other four) so they read as clickable at a glance:
+like the others) so they read as clickable at a glance:
 
 ![Close-up of the Harvest and Recycle chips](docs/screenshots/chips-harvest-recycle.png)
 
@@ -84,8 +85,10 @@ like the other four) so they read as clickable at a glance:
   with expected drop counts.
 - **Recycle** -- every other item you could break down at a Recycler to
   get this one back as a yield.
+- **Scrap** -- every other item you could break down with the in-inventory
+  Scrap action to get this one back.
 
-Both are grouped into **High / Medium / Low yield** tiers, relative to
+All three are grouped into **High / Medium / Low yield** tiers, relative to
 the best source for that specific item -- so the top of the list is
 always where you should actually go looking first.
 

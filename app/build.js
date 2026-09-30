@@ -1277,10 +1277,19 @@ window.ULModBuddyBuilder = (function () {
     return null;
   }
 
+  // Returns { scrapYields, scrapSources } -- scrapSources is the reverse
+  // index (what can I scrap in my inventory to GET this), built and shaped
+  // exactly like recycleSources: same tier-variant collapsing, same
+  // expected-yield sort, same high/medium/low bucketing, so it renders
+  // through the identical source modal. See build.py's load_scrap_data()
+  // for the full writeup. Scrapping has no probability or count range
+  // (always the one fixed count for a given item) -- countMin/countMax/
+  // prob are just that count and 1, purely to fit the shared shape.
   async function loadScrapData(paths, allNames, extendsMap) {
     const forgeCategories = await loadMaterialForgeCategories(paths);
     const { props, allIds } = await loadMaterialWeightProps(paths);
     const scrapYields = {};
+    const scrapSources = {};
     for (const nm of allNames) {
       const [material, weight] = resolveMaterialWeight(nm, props, extendsMap);
       if (!material || !weight) continue;
@@ -1288,9 +1297,17 @@ window.ULModBuddyBuilder = (function () {
       if (!target) continue;
       const count = Math.ceil(parseFloat(weight) / 10);
       if (!Number.isFinite(count)) continue;
-      scrapYields[nm] = { name: target, count: Math.max(1, count) };
+      const clampedCount = Math.max(1, count);
+      scrapYields[nm] = { name: target, count: clampedCount };
+      (scrapSources[target] = scrapSources[target] || []).push({
+        item: nm, countMin: clampedCount, countMax: clampedCount, prob: 1,
+      });
     }
-    return scrapYields;
+    for (const name in scrapSources) {
+      scrapSources[name] = collapseTierVariants(scrapSources[name], "item");
+    }
+    sortAndTierSources(scrapSources, "item");
+    return { scrapYields, scrapSources };
   }
 
   // -------------------------------------------------------------------
@@ -2020,8 +2037,9 @@ window.ULModBuddyBuilder = (function () {
     const { extendsMap, childrenMap } = await loadExtendsGraph(paths);
 
     log("Loading scrap data (Material/Weight -> in-inventory Scrap output)...");
-    const scrapYields = await loadScrapData(paths, allNames, extendsMap);
-    log(`  ${Object.keys(scrapYields).length} scrappable name(s) resolved`);
+    const { scrapYields, scrapSources } = await loadScrapData(paths, allNames, extendsMap);
+    const scrappable = new Set(Object.keys(scrapSources));
+    log(`  ${Object.keys(scrapYields).length} scrappable name(s) resolved, ${scrappable.size} distinct scrap output(s), ${Object.values(scrapSources).reduce((s, v) => s + v.length, 0)} source row(s)`);
     // Fold scrap output targets into allNames BEFORE icon resolution below --
     // see build.py's load_scrap_data() call for why (a target like a "Parts"
     // item can be reachable only via scrapYields, with a real base-game icon
@@ -2116,9 +2134,16 @@ window.ULModBuddyBuilder = (function () {
       log(`  collapsed ${before - after} look-alike recycle source row(s) (same display name/icon/yield under a different internal item name)`);
     }
 
+    before = Object.values(scrapSources).reduce((s, v) => s + v.length, 0);
+    collapseSourceLookalikes(scrapSources, names, icons, "item");
+    after = Object.values(scrapSources).reduce((s, v) => s + v.length, 0);
+    if (before !== after) {
+      log(`  collapsed ${before - after} look-alike scrap source row(s) (same display name/icon/yield under a different internal item name)`);
+    }
+
     const craftable = new Set(Object.keys(recipesByName));
     const acquisition = {};
-    for (const nm of new Set([...craftable, ...harvestable, ...purchasable, ...lootable, ...rewardable, ...recyclable])) {
+    for (const nm of new Set([...craftable, ...harvestable, ...purchasable, ...lootable, ...rewardable, ...recyclable, ...scrappable])) {
       const entry = {};
       if (craftable.has(nm)) entry.craftable = true;
       if (harvestable.has(nm)) entry.harvestable = true;
@@ -2126,6 +2151,7 @@ window.ULModBuddyBuilder = (function () {
       if (lootable.has(nm)) entry.lootable = true;
       if (rewardable.has(nm)) entry.rewardable = true;
       if (recyclable.has(nm)) entry.recyclable = true;
+      if (scrappable.has(nm)) entry.scrappable = true;
       acquisition[nm] = entry;
     }
 
@@ -2151,6 +2177,8 @@ window.ULModBuddyBuilder = (function () {
           recycleYieldItems: Object.keys(recycleYields).length,
           recycleSourceRows: Object.values(recycleSources).reduce((s, v) => s + v.length, 0),
           scrapYieldItems: Object.keys(scrapYields).length,
+          scrappable: scrappable.size,
+          scrapSourceRows: Object.values(scrapSources).reduce((s, v) => s + v.length, 0),
           openYieldItems: Object.keys(openYields).length,
           itemMods: itemMods.size,
           vehicles: Object.keys(vehicles).length,
@@ -2172,6 +2200,7 @@ window.ULModBuddyBuilder = (function () {
       recycleYields,
       recycleSources,
       scrapYields,
+      scrapSources,
       openYields,
       itemMods: [...itemMods].sort(),
       vehicles,

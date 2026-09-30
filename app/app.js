@@ -431,6 +431,12 @@ window.ULModBuddyApp = (function () {
     showSourceModal(`Recycle Sources — ${displayName(name)}`, sources, "item");
   };
 
+  window.__cookbookShowScrapSources = function (name) {
+    const sources = data.scrapSources && data.scrapSources[name];
+    if (!sources || !sources.length) return;
+    showSourceModal(`Scrap Sources — ${displayName(name)}`, sources, "item");
+  };
+
   // Loot Sources -- a different shape from Harvest/Recycle above (no
   // count, no tier bucket): one row per lootcontainer this item is
   // reachable from, each with the block(s)/killed entity(ies) that
@@ -1601,9 +1607,11 @@ window.ULModBuddyApp = (function () {
   // Ordered least-common (left) to most-common (right), so the badge you're
   // most likely to see for any given item sits closest to the name, and the
   // rarer channels are the ones pushed furthest away.
-  // Measured counts at build time: recyclable 83, harvestable 151,
-  // rewardable 950, craftable ~921, lootable 1241, purchasable 1445.
+  // Measured counts at build time: scrappable ~60, recyclable 83,
+  // harvestable 151, rewardable 950, craftable ~921, lootable 1241,
+  // purchasable 1445.
   const ACQUISITION_LABELS = {
+    scrappable: "Scrap",
     recyclable: "Recycle",
     rewardable: "Quest",
     harvestable: "Harvest",
@@ -1611,21 +1619,22 @@ window.ULModBuddyApp = (function () {
     lootable: "Loot",
     purchasable: "Buy",
   };
-  // The two badges with real detail behind them (data.harvestSources /
-  // data.recycleSources) -- clickable only when that detail actually
-  // exists for this name, rather than always-on and sometimes opening an
-  // empty modal.
+  // The three badges with real detail behind them (data.harvestSources /
+  // data.recycleSources / data.scrapSources) -- clickable only when that
+  // detail actually exists for this name, rather than always-on and
+  // sometimes opening an empty modal.
   const ACQUISITION_SOURCE_LINKS = {
     harvestable: { sources: () => data.harvestSources, fn: "__cookbookShowHarvest", title: "See harvest sources" },
     recyclable: { sources: () => data.recycleSources, fn: "__cookbookShowRecycleSources", title: "See recycle sources" },
     lootable: { sources: () => data.lootSources || {}, fn: "__cookbookShowLoot", title: "See loot sources" },
+    scrappable: { sources: () => data.scrapSources, fn: "__cookbookShowScrapSources", title: "See scrap sources" },
   };
   // Wrapped in its own flex span (margin-left: auto) rather than left as
   // loose inline badges, so it pushes to the right edge of whatever
   // flex row it lands in -- the item name reads easier when it isn't
   // competing with a run of badges immediately after it.
   //
-  // Every one of the 6 channels always gets a slot, in the same fixed
+  // Every one of the 7 channels always gets a slot, in the same fixed
   // order, whether or not this name actually has that badge -- a missing
   // one renders as an invisible placeholder (.acq-badge-empty) rather than
   // being skipped, so every row's badges line up in the same fixed

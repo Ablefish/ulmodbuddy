@@ -25,6 +25,7 @@
   --acq-lootable: #7d6690;
   --acq-rewardable: #93893f;
   --acq-recyclable: #5c7896;
+  --acq-scrappable: #8a6a6a;
 }
 
 * { box-sizing: border-box; }
@@ -544,11 +545,11 @@ img.icon-ring-workstation {
   margin-top: 6px;
 }
 
-/* Acquisition tags (recyclable/craftable/harvestable/purchasable/lootable/
-   rewardable): each gets its own muted color (see --acq-* above) so they're
-   quickly distinguishable from one another, but all stay outline-only
-   against the same neutral fill -- subtle on purpose, since these are a
-   secondary fact about an item, not a kind identity the way the
+/* Acquisition tags (scrappable/recyclable/craftable/harvestable/purchasable/
+   lootable/rewardable): each gets its own muted color (see --acq-* above) so
+   they're quickly distinguishable from one another, but all stay
+   outline-only against the same neutral fill -- subtle on purpose, since
+   these are a secondary fact about an item, not a kind identity the way the
    blue/green/orange theme colors are. */
 .acq-badge {
   display: inline-block;
@@ -559,9 +560,9 @@ img.icon-ring-workstation {
   background: var(--panel-alt);
   border: 1px solid var(--border);
   color: var(--text-dim);
-  /* Fixed so every badge in a given slot (Recycle/Quest/Harvest/Craft/
-     Loot/Buy, always in that order) lines up at the same x position from
-     row to row, like a table column -- wide enough for "Harvest", the
+  /* Fixed so every badge in a given slot (Scrap/Recycle/Quest/Harvest/
+     Craft/Loot/Buy, always in that order) lines up at the same x position
+     from row to row, like a table column -- wide enough for "Harvest", the
      longest label. */
   min-width: 50px;
   text-align: center;
@@ -572,6 +573,7 @@ img.icon-ring-workstation {
 .acq-badge-lootable { border-color: var(--acq-lootable); color: var(--acq-lootable); }
 .acq-badge-rewardable { border-color: var(--acq-rewardable); color: var(--acq-rewardable); }
 .acq-badge-recyclable { border-color: var(--acq-recyclable); color: var(--acq-recyclable); }
+.acq-badge-scrappable { border-color: var(--acq-scrappable); color: var(--acq-scrappable); }
 
 /* A channel this item doesn't have -- kept in the DOM (not skipped) so its
    column still reserves its slot; invisible rather than just blank so it
@@ -580,14 +582,14 @@ img.icon-ring-workstation {
   visibility: hidden;
 }
 
-/* Harvest, Recycle, and Loot are the three badges that are ever interactive
-   (see the shared source modal below) -- solid-filled with white text
-   rather than the usual outline, so a clickable badge reads as a little
-   button at a glance instead of just another fact, not only on hover. Each
-   badge type fills with ITS OWN color (not a single hardcoded one), since
-   there's more than one clickable channel now; brightens further on
-   hover as the interactive affordance the filled state doesn't already
-   cover. */
+/* Harvest, Recycle, Loot, and Scrap are the four badges that are ever
+   interactive (see the shared source modal below) -- solid-filled with
+   white text rather than the usual outline, so a clickable badge reads as a
+   little button at a glance instead of just another fact, not only on
+   hover. Each badge type fills with ITS OWN color (not a single hardcoded
+   one), since there's more than one clickable channel now; brightens
+   further on hover as the interactive affordance the filled state doesn't
+   already cover. */
 .acq-badge-clickable {
   cursor: pointer;
   color: #fff;
@@ -603,6 +605,10 @@ img.icon-ring-workstation {
 .acq-badge-lootable.acq-badge-clickable {
   background: var(--acq-lootable);
   border-color: var(--acq-lootable);
+}
+.acq-badge-scrappable.acq-badge-clickable {
+  background: var(--acq-scrappable);
+  border-color: var(--acq-scrappable);
 }
 .acq-badge-clickable:hover {
   filter: brightness(1.25);
