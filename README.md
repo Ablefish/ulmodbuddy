@@ -16,6 +16,10 @@ mod for *7 Days to Die*, built directly from your own install:
   your inventory or at a Recycler.
 - **Harvest** and **Recycle Sources** -- every source for a given item,
   ranked by expected yield.
+- **Loot Sources** -- which containers and kills can drop an item, with a
+  combined drop-chance estimate at a given loot stage. This is the most
+  complex calculation in the app, so treat the numbers as a rough guide,
+  not verified odds.
 - **Research Tree** -- a visual map of each research category, or a
   compact grid of every recipe grouped by workstation; hover an icon to
   see what it unlocks.
@@ -114,20 +118,4 @@ regenerate against your updated install.
 - Every warning about the mod's own data (unresolved references, likely
   typos, missing localization) is visible in-app via the "N build
   warning(s)" link in the header, not just in a terminal.
-- **Loot Sources** shows which containers/kills can drop an item and,
-  interactively, its combined drop chance at a given loot stage -- computed
-  as a chain of independent access checks multiplied together (a weapon's
-  whole tier is routinely gated by a probability curve on the reference to
-  its tier group, e.g. an AK-47 is 0% below loot stage 10, not on the gun
-  itself), not verified real-game odds. Known gaps: no `<requirement>`
-  biome/quest/perk gating, no weighting between multiple possible sources,
-  and the final weighted pick among an already-gated group's own siblings
-  (a bare `prob` above 1 in the source XML) isn't resolvable from data
-  alone, so it's dropped rather than guessed at. We also could not
-  isolate what actually raises the loot-bag drop rate during a wandering
-  horde or blood moon in the mod's own XML -- a biome storm buff visibly
-  boosts it (`buffBurnt_Storm` and friends), but the horde/blood-moon
-  effect isn't backed by any explicit modifier we could find, in either
-  Undead Legacy's own data or the base game's; it may be layered on by the
-  underlying 7 Days to Die engine rather than anything moddable in XML.
 - See [CHANGELOG.md](CHANGELOG.md) for release history.
