@@ -1101,7 +1101,7 @@ img.icon-ring-workstation {
 .tree-node-tooltip {
   position: fixed;
   z-index: 30;
-  max-width: 260px;
+  max-width: 300px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1123,6 +1123,28 @@ img.icon-ring-workstation {
 .tree-node-tooltip-icon {
   width: 30px;
   height: 30px;
+}
+
+/* Recipe grid's tooltip is a small recipe card, not just a name --
+   showRecipeDotTooltip's header (icon+name(+yield)) reuses
+   .tree-node-tooltip-item as-is, bolded, with the ingredient list (same
+   .ingredient-list/.ing-icon/.ing-count convention as the item detail
+   page's own Construction Cost list) set off below it. */
+.tree-node-tooltip-header {
+  font-weight: 600;
+}
+.tree-node-tooltip-yield {
+  font-weight: 400;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.tree-node-tooltip-ingredients {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.tree-node-tooltip-ingredients li {
+  font-size: 13px;
 }
 
 .tree-node circle {

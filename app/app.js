@@ -954,7 +954,7 @@ window.ULModBuddyApp = (function () {
         }
       }
     }
-    const groups = new Map(); // rowKey -> { key, label, tiered, items: [{name, tier, researchTier}] }
+    const groups = new Map(); // rowKey -> { key, label, tiered, items: [{name, area, tier, researchTier}] }
     for (const name of recipeNames) {
       const areas = new Set();
       for (const rid of data.recipesByName[name]) areas.add(data.recipes[rid].area || null);
@@ -965,7 +965,12 @@ window.ULModBuddyApp = (function () {
         if (!groups.has(rowInfo.key)) {
           groups.set(rowInfo.key, { key: rowInfo.key, label: rowInfo.label, tiered: rowInfo.tiered, items: [] });
         }
-        groups.get(rowInfo.key).items.push({ name, tier, researchTier });
+        // area travels with the item (not just the group) so the hover
+        // tooltip can resolve exactly which of a recipe's several variants
+        // (e.g. craftable at both a tier-1 and tier-2 station) this
+        // specific dot represents -- data.recipesByName[name] alone is
+        // ambiguous whenever a recipe has more than one.
+        groups.get(rowInfo.key).items.push({ name, area, tier, researchTier });
       }
     }
     return [...groups.values()].sort((a, b) => b.items.length - a.items.length);
@@ -1113,7 +1118,13 @@ window.ULModBuddyApp = (function () {
         const recipeIcon = iconFor(item.name);
         const x = (RG_LEFT + cx * RG_CELL + RG_CELL / 2).toFixed(1);
         const y = (RG_TOP + cy * RG_CELL + RG_CELL / 2).toFixed(1);
-        nodesHtml += `<g class="tree-node rgrid-node ${tierCls} ${researchTierCls}" data-name="${item.name}" transform="translate(${x},${y})">`;
+        // data-area (omitted entirely when null, rather than an empty
+        // string, so the tooltip can tell "no area" apart from "attribute
+        // just wasn't read yet") resolves exactly which recipe variant
+        // this dot is, since data.recipesByName[name] alone can hold
+        // several -- see showRecipeDotTooltip.
+        const areaAttr = item.area === null ? "" : ` data-area="${item.area}"`;
+        nodesHtml += `<g class="tree-node rgrid-node ${tierCls} ${researchTierCls}" data-name="${item.name}"${areaAttr} transform="translate(${x},${y})">`;
         nodesHtml += `<circle r="${RG_DOT_R}"/>`;
         if (recipeIcon) {
           nodesHtml += `<image href="${recipeIcon}" x="${(-RG_DOT_R * 0.7).toFixed(1)}" y="${(-RG_DOT_R * 0.7).toFixed(1)}" width="${(RG_DOT_R * 1.4).toFixed(1)}" height="${(RG_DOT_R * 1.4).toFixed(1)}"/>`;
@@ -1521,12 +1532,44 @@ window.ULModBuddyApp = (function () {
     positionTreeNodeTooltip(nodeEl);
   }
 
-  // Recipe grid dots are recipes, not research nodes -- there's no
-  // "unlocks" list to show, just the one recipe itself.
+  // One <li> per direct ingredient -- same icon+qty+name shape used
+  // everywhere else in the app (e.g. renderTotalsCard), just not wrapped
+  // in jumpSpan's click-to-navigate since a tooltip is transient and
+  // pointer-events:none anyway.
+  function recipeIngredientRowsHtml(recipe) {
+    return (recipe.ingredients || [])
+      .filter((ing) => ing.name)
+      .map((ing) => {
+        const qty = parseFloat(ing.count) || 1;
+        return `<li>${reportRowIcon(ing.name)}<span class="ing-count">${qtyLabel(qty)}×</span><span>${displayName(ing.name)}</span></li>`;
+      })
+      .join("");
+  }
+
+  // Recipe grid dots are recipes, not research nodes: instead of an
+  // "unlocks" list, hovering shows the full recipe -- every direct
+  // ingredient, flattened one level (no expand/collapse, same as the item
+  // detail page's own Construction Cost list before anything's expanded)
+  // -- enough to compare two recipes' cost at a glance without clicking
+  // through to either page. data.recipesByName[name] can hold several
+  // variants at different workstations; data-area (set in
+  // renderRecipeGridSvg from the exact area recipeGridGroups resolved for
+  // this dot) picks the one this specific dot actually represents.
   function showRecipeDotTooltip(nodeEl) {
     const name = nodeEl.dataset.name;
-    treeNodeTooltipEl.innerHTML =
-      `<div class="tree-node-tooltip-item">${reportRowIcon(name, "tree-node-tooltip-icon")}<span>${displayName(name)}</span></div>`;
+    const area = nodeEl.dataset.area === undefined ? null : nodeEl.dataset.area;
+    const ids = data.recipesByName[name] || [];
+    const recipe = data.recipes[ids.find((id) => (data.recipes[id].area || null) === area) || ids[0]];
+
+    const yieldQty = recipe ? parseFloat(recipe.count) || 1 : 1;
+    const yieldNote = yieldQty !== 1 ? ` <span class="tree-node-tooltip-yield">(makes ${qtyLabel(yieldQty)})</span>` : "";
+    let html =
+      `<div class="tree-node-tooltip-item tree-node-tooltip-header">` +
+      `${reportRowIcon(name, "tree-node-tooltip-icon")}<span>${displayName(name)}${yieldNote}</span></div>`;
+    const rows = recipe ? recipeIngredientRowsHtml(recipe) : "";
+    if (rows) html += `<ul class="ingredient-list tree-node-tooltip-ingredients">${rows}</ul>`;
+
+    treeNodeTooltipEl.innerHTML = html;
     treeNodeTooltipEl.hidden = false;
     positionTreeNodeTooltip(nodeEl);
   }

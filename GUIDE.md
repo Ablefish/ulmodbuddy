@@ -113,7 +113,7 @@ two views you're looking at:
   all, and its background tint shows how early you can research building
   it in the first place.
 
-![Research Tree for the "Cooking" category, showing tier-colored ring icons, the category dropdown, and a hover popup listing what Spaghetti unlocks](docs/screenshots/research-tree.png)
+![Research Tree for the "Cooking" category in Research tree mode, showing the Research tree/Recipe grid toggle, tier-colored ring icons, the category dropdown, and a hover popup listing what Spaghetti unlocks](docs/screenshots/research-tree.png)
 
 In Recipe grid mode, each recipe icon itself carries two independent
 tiers, both spelled out in the legend once you switch: the **ring** color
@@ -128,6 +128,8 @@ early floats to the top of its block while its ring still shows the high
 station tier it actually requires, instead of sinking to the bottom
 sorted by that same station tier.
 
+![Recipe grid for the "Cooking" category, showing workstation blocks with tier-tinted header icons, the sort toggle, and the ring/fill legend](docs/screenshots/recipe-grid.png)
+
 Getting around a tree/grid bigger than the window:
 
 - **Click-drag** anywhere on the canvas to pan around. Panning stops at
@@ -138,9 +140,11 @@ Getting around a tree/grid bigger than the window:
   of the whole category, scaled to fill the available space on whichever
   axis is more constraining (so a small category fills the view rather
   than sitting tiny in the middle of it).
-- **Hovering a node or recipe icon** pops up what it is -- Spaghetti's
-  own research node, shown above, unlocks just the one recipe; some
-  research nodes unlock several at once.
+- **Hovering a research node** pops up what it unlocks -- Spaghetti's own
+  node, shown above, unlocks just the one recipe; some research nodes
+  unlock several at once. **Hovering a recipe icon** in Recipe grid mode
+  instead pops up that recipe's full ingredient list, so you can compare
+  two recipes' cost without clicking into either one.
 - **Clicking a node or recipe icon** jumps straight to that item/research's
   own detail page, same as clicking it in the search results.
 
