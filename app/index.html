@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>UL Mod Buddy</title>
-<link rel="stylesheet" href="styles.css?dev=33">
+<link rel="stylesheet" href="styles.css?dev=34">
 </head>
 <body>
 <header>
@@ -129,6 +129,8 @@
                placeholder="Path to your 7 Days To Die install, e.g. C:\7D2D\Custom\Undead_2.7.24">
         <button id="build-submit" type="submit">Build</button>
       </form>
+      <div id="build-current-folder" class="build-current-folder" hidden
+           title="The browser's File System Access API never exposes a picked folder's full path -- just its own name, shown here."></div>
       <div id="build-choose-row" class="build-choose-row">
         <button id="build-choose" type="button">Choose your install folder&hellip;</button>
         <button id="build-choose-new" type="button" hidden>Choose a different folder&hellip;</button>
@@ -145,9 +147,9 @@
      whenever a stale browser cache serves an old copy of one of these
      mid-session. Harmless to ship, but fine to drop before a real release. -->
 <script src="reportEngine.js?dev=5"></script>
-<script src="build.js?dev=8"></script>
+<script src="build.js?dev=9"></script>
 <script src="storage.js?dev=2"></script>
 <script src="app.js?dev=75"></script>
-<script src="setup.js?dev=5"></script>
+<script src="setup.js?dev=6"></script>
 </body>
 </html>

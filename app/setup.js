@@ -47,6 +47,7 @@
   const chooseEl = $("#build-choose");
   const chooseNewEl = $("#build-choose-new");
   const chooseRowEl = $("#build-choose-row");
+  const currentFolderEl = $("#build-current-folder");
   const unsupportedEl = $("#build-unsupported");
   const formEl = $("#build-form");
   const pathInputEl = $("#build-path-input");
@@ -109,6 +110,14 @@
       // rebuild from -- first-run setup has nothing to contrast "a different
       // folder" against, so it stays a single button there.
       chooseNewEl.hidden = !hasSavedRoot;
+      // `saved.name` is genuinely all a FileSystemDirectoryHandle can tell
+      // us -- the File System Access API deliberately never exposes a
+      // picked folder's absolute path, only the leaf folder name itself.
+      // Still worth showing: with more than one install folder around (a
+      // live one, a test clone, an old version kept for comparison), that
+      // name is exactly what tells them apart.
+      currentFolderEl.hidden = !hasSavedRoot;
+      currentFolderEl.textContent = hasSavedRoot ? `Current folder: ${saved.name}` : "";
       setBuilding(false);
     } else {
       prefillServerPath();

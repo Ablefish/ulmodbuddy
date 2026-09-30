@@ -1392,6 +1392,16 @@ img.icon-ring-workstation {
   cursor: default;
 }
 
+/* Shown only once a folder's been picked before (see setup.js's open()) --
+   just the leaf folder name, not a full path (the File System Access API
+   never exposes one), but still the one thing that tells two similarly-
+   named install folders apart when rebuilding. */
+.build-current-folder {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
 .build-choose-row {
   display: flex;
   gap: 10px;

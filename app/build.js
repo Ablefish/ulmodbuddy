@@ -392,10 +392,21 @@ window.ULModBuddyBuilder = (function () {
   // -------------------------------------------------------------------
   // Recipes (crafting) -- <recipe> in recipes.xml / Custom/recipes_armor.xml
   // -------------------------------------------------------------------
+  // A bare <wildcard_forge_category/> child instead of any <ingredient>s
+  // (always paired with tags="salvageScrap", or its typo "salvsageScrap" --
+  // see KNOWN_TAG_TYPOS) is the base game's own generic "Salvage anything
+  // whose material shares this forge_category" crafting-window mechanic --
+  // it accepts whatever matching item you feed it at craft time, never a
+  // fixed ingredient list, so there's no cost tree to show. See build.py's
+  // load_recipes() for the full writeup of why this is skipped entirely
+  // rather than kept as an empty, costless recipe (e.g. Scrap Iron has no
+  // other recipe at all, and would otherwise show up as "craftable" via
+  // this phantom entry instead of the plain acquired-only item it is).
   async function loadRecipes(paths) {
     const recipes = {};
     const recipesByName = {};
     const seenCounts = {};
+    let wildcardSalvageSkipped = 0;
     for (const fileRef of paths.recipeFiles) {
       const doc = await readAndParse(fileRef);
       if (!doc) continue;
@@ -411,6 +422,10 @@ window.ULModBuddyBuilder = (function () {
           if (t in KNOWN_TAG_TYPOS) {
             warn(`recipe '${name}': tag '${t}' looks like a typo for '${KNOWN_TAG_TYPOS[t]}' (stored as-is)`);
           }
+        }
+        if (directChildren(el, "wildcard_forge_category").length) {
+          wildcardSalvageSkipped++;
+          continue;
         }
         const ingredients = directChildren(el, "ingredient").map((c) => ({
           name: attr(c, "name"),
@@ -450,7 +465,7 @@ window.ULModBuddyBuilder = (function () {
           `(${totalVariants} recipe entries total) -- all kept, see recipesByName`
       );
     }
-    return { recipes, recipesByName };
+    return { recipes, recipesByName, wildcardSalvageSkipped };
   }
 
   // -------------------------------------------------------------------
@@ -1934,9 +1949,10 @@ window.ULModBuddyBuilder = (function () {
     const names = await loadLocalization(paths, log);
 
     log("Loading recipes...");
-    const { recipes, recipesByName } = await loadRecipes(paths);
+    const { recipes, recipesByName, wildcardSalvageSkipped } = await loadRecipes(paths);
     const variantNames = Object.values(recipesByName).filter((ids) => ids.length > 1).length;
     log(`  ${Object.keys(recipes).length} recipe entries (${Object.keys(recipesByName).length} distinct item names, ${variantNames} with 2+ alternate recipes)`);
+    log(`  ${wildcardSalvageSkipped} generic <wildcard_forge_category/> salvage recipe(s) skipped (Salvage-anything-of-this-material templates, not real recipes)`);
 
     log("Loading workstation tier upgrades...");
     const upgrades = await loadUpgrades(paths);

@@ -367,7 +367,7 @@ def read_text(path):
 # ---------------------------------------------------------------------------
 def load_recipes():
     """
-    Returns (recipes, recipes_by_name).
+    Returns (recipes, recipes_by_name, wildcard_salvage_skipped).
 
     IMPORTANT: the source XML legitimately defines *multiple* <recipe> entries
     sharing the same `name` attribute -- these are alternate recipes for the
@@ -375,6 +375,22 @@ def load_recipes():
     kit, OR from raw hide, OR is always_unlocked as a salvage byproduct). This
     is the exact "alternate recipe" concept the UL Mod Buddy app is built around,
     so every variant must be kept, never collapsed to "last one wins".
+
+    One <recipe> shape is deliberately NOT kept as a real recipe: a bare
+    <wildcard_forge_category/> child instead of any <ingredient>s (always
+    paired with tags="salvageScrap", or its one-off typo "salvsageScrap" --
+    see KNOWN_TAG_TYPOS). That's the base game's own generic "Salvage
+    anything whose material shares this forge_category" crafting-window
+    mechanic -- it accepts whatever matching item you feed it at craft
+    time, never a fixed ingredient list, so there's no cost tree to show.
+    Every salvageable resource picks one up alongside whatever REAL recipe(s)
+    it might also have (Fabric keeps its genuine Tailor's Station recipe;
+    Scrap Iron has no other recipe at all and, without this skip, would
+    otherwise show up as "craftable" via an empty, costless phantom recipe
+    instead of the plain acquired-only item it actually is -- exactly like
+    Rubber). Skipped entirely rather than kept-but-hidden, so
+    recipes/recipesByName/craftable stay a clean "does this have a real,
+    orderable recipe" signal.
 
     Each recipe gets a unique storage id: the bare name for the first
     occurrence, then "<name>#2", "<name>#3", ... for later ones. The `name`
@@ -385,6 +401,7 @@ def load_recipes():
     recipes = {}
     recipes_by_name = {}
     seen_counts = {}
+    wildcard_salvage_skipped = 0
     for path in RECIPE_FILES:
         if not path.exists():
             warn(f"missing expected file: {path}")
@@ -408,6 +425,7 @@ def load_recipes():
                     )
             ingredients = []
             outputs = []
+            is_wildcard_salvage = False
             for child in el:
                 if child.tag == "ingredient":
                     ingredients.append(
@@ -417,6 +435,11 @@ def load_recipes():
                     outputs.append(
                         {"name": child.attrib.get("name"), "count": child.attrib.get("count", "1")}
                     )
+                elif child.tag == "wildcard_forge_category":
+                    is_wildcard_salvage = True
+            if is_wildcard_salvage:
+                wildcard_salvage_skipped += 1
+                continue
 
             seen_counts[name] = seen_counts.get(name, 0) + 1
             n = seen_counts[name]
@@ -444,7 +467,7 @@ def load_recipes():
             f"{len(variant_counts)} item name(s) have multiple alternate recipes "
             f"({total_variants} recipe entries total) -- all kept, see recipesByName"
         )
-    return recipes, recipes_by_name
+    return recipes, recipes_by_name, wildcard_salvage_skipped
 
 
 # ---------------------------------------------------------------------------
@@ -2342,10 +2365,12 @@ def main(install_root):
     names = load_localization()
 
     print("Loading recipes...")
-    recipes, recipes_by_name = load_recipes()
+    recipes, recipes_by_name, wildcard_salvage_skipped = load_recipes()
     variant_names = sum(1 for ids in recipes_by_name.values() if len(ids) > 1)
     print(f"  {len(recipes)} recipe entries ({len(recipes_by_name)} distinct item names, "
           f"{variant_names} with 2+ alternate recipes)")
+    print(f"  {wildcard_salvage_skipped} generic <wildcard_forge_category/> salvage recipe(s) "
+          f"skipped (Salvage-anything-of-this-material templates, not real recipes)")
 
     print("Loading workstation tier upgrades...")
     upgrades = load_upgrades()
