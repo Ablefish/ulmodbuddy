@@ -1,98 +1,90 @@
 # UL Mod Buddy
 
-New here? See the **[User Guide](GUIDE.md)** for a walkthrough of what it
-can do, with screenshots.
+Stop alt-tabbing to a wiki that's three updates behind. **UL Mod Buddy** is
+a searchable crafting, research, and loot reference for the
+[Undead Legacy](http://ul.subquake.com) mod for *7 Days to Die*, built
+straight from your own install -- so it's always current with whatever
+version you're actually running.
 
-A browsable recipe/research/workstation reference for the [Undead Legacy](http://ul.subquake.com)
-mod for *7 Days to Die*, built directly from your own install:
+New here? The **[User Guide](GUIDE.md)** walks through all of this with
+screenshots.
 
-- **Full crafting cost breakdown** -- search any item, research topic, or
-  workstation and expand a cascading, click-to-expand cost tree all the way
-  down to raw materials: ingredients, research prerequisites, workstations,
-  tools, and every way to acquire each one (Craft / Loot / Buy / Harvest /
-  Recycle / Scrap / Quest).
-- **Opens Into**, **Scraps Into**, and **Recycles Into** -- what a bundle
-  or ammo box unpacks into, and what breaking an item down gives back, in
-  your inventory or at a Recycler.
-- **Harvest**, **Recycle**, and **Scrap Sources** -- every source for a
-  given item, ranked by expected yield.
-- **Loot Sources** -- which containers and kills can drop an item, with a
-  combined drop-chance estimate at a given loot stage. This is the most
-  complex calculation in the app, so treat the numbers as a rough guide,
-  not verified odds.
+## Highlights
+
+- **How do I get it?** -- every ingredient shows every way to acquire it:
+  Craft, Loot, Buy, Harvest, Recycle, Scrap, or Quest.
+- **What do I get *from* it?** -- the reverse question, answered too:
+  **Opens Into**, **Scraps Into**, and **Recycles Into** show what a
+  bundle, ammo box, or breakdown actually yields.
+- **Full cost tree** -- search any item, research topic, or workstation
+  and expand a click-to-expand chain all the way down to raw materials.
 - **Research Tree** -- a visual map of each research category, or a
-  compact grid of every recipe grouped by workstation; hover an icon to
-  see what it unlocks.
-- **Vehicles** -- per-vehicle stats, tiered repair costs, and a sortable
-  comparison table across all of them.
-- **Build warnings** -- gaps or oddities in the mod's own data (typos,
-  missing localization, unresolved references) surfaced in-app, not
-  buried in a terminal log.
+  compact Recipe grid of everything one workstation can make.
+- **Vehicles** -- stats, repair costs, and a sortable comparison table.
+- **Build warnings** -- gaps or typos in the mod's own data, surfaced
+  in-app instead of buried in a log.
 
-This is an unofficial fan-made tool. It is not affiliated with The Fun
-Pimps or Subquake.
+This is a hobby project, built and maintained in spare time -- not an
+official tool, and not affiliated with The Fun Pimps or Subquake.
 
 ## Which setup do I need?
 
-The app needs to read your own *7 Days to Die* + Undead Legacy install to
-build its data -- there's no bundled copy of the mod (see
-[Privacy & security](#privacy--security) below). How you point it at that
-install depends on your browser:
-
-- **Using Chrome or Edge?** Use **[zero-install setup](#setup-zero-install----chrome-or-edge)** --
-  no download, no Python, just a link.
-- **Using Firefox, Safari, or Brave?** Use the **[Python fallback](#setup-fallback----firefox-safari-brave-without-the-flag-or-local-python)** --
-  a few extra steps, but only needs Python (already installed on most
+- **[Zero download](#zero-download)** -- just open the hosted link. Chrome
+  or Edge only.
+- **[Zero install](#zero-install)** -- download this repo and open a file.
+  Still Chrome or Edge only, but nothing ever talks to the hosted site.
+- **[Python](#python)** -- for Firefox, Safari, or Brave without a flag
+  flipped. A few extra steps, but only needs Python (already on most
   systems).
 
-## Setup (zero install -- Chrome or Edge)
+Either way, the app needs to read your own *7 Days to Die* + Undead
+Legacy install to build its data -- there's no bundled copy of the mod
+(see [Privacy & security](#privacy--security) below).
 
-1. Open **<https://ablefish.github.io/ulmodbuddy/>** -- or, if you'd rather
-   run it from a local copy, clone this repository and open `app/index.html`
-   directly in your browser. Either way, no server or Python is needed.
+### Zero download
+
+1. Open **<https://ablefish.github.io/ulmodbuddy/>**.
 2. Click **Choose your install folder...** and pick your *7 Days to Die*
-   install -- the default vanilla Steam location, e.g.
-   `D:\SteamInstall\steamapps\common\7 Days To Die`, if you installed Undead
-   Legacy directly into it, or a separate folder like
-   `C:\7D2D\Custom\Undead_22` if you used a mod launcher (e.g. ModLauncherV5)
-   that clones a fresh install per modpack. Either way, the folder should
-   contain both `Mods\UndeadLegacy` and `Data`. Your browser will ask you to
-   confirm read access to it.
-3. The app reads your local install and builds the dataset right there in
-   the page; it takes a few seconds. That's it -- the app takes over once
-   the build finishes.
+   install -- the folder containing both `Mods\UndeadLegacy` and `Data`
+   (e.g. the default Steam location, or a modpack-specific folder if you
+   used a mod launcher). Your browser will ask you to confirm read access.
+3. The app builds its dataset right there in the page -- a few seconds,
+   then it takes over.
 
-Your picked folder and the built dataset are both remembered (via your
-browser's local storage) for next time, so a returning visit loads
-instantly without repeating this. If you update the mod yourself later,
-click **Rebuild data** in the header to regenerate against your updated
-install.
+Your folder and the built dataset are both remembered for next time, so a
+returning visit loads instantly. Click **Rebuild data** in the header any
+time you update the mod.
 
-Chrome and Edge support this out of the box; Firefox and Safari currently
-don't. **Brave** ships the same engine as Chrome but disables it by
-default -- enable it at `brave://flags/#file-system-access-api` and
-relaunch the browser, or just use Chrome/Edge instead. If none of that
-works for you, use the Python fallback below.
+### Zero install
 
-## Setup (fallback -- Firefox, Safari, Brave without the flag, or local Python)
+Same mechanism as above, just from your own local copy instead of the
+hosted page -- handy if you'd rather not point a hosted site at your
+install folder at all, even though nothing ever actually leaves your
+browser either way.
 
-Requirements: Python 3 (no extra packages -- everything here is standard
-library only), and the same *7 Days to Die* + Undead Legacy install
-described above.
+1. Download or clone this repository somewhere on your computer.
+2. Open `[PATH TO THE REPOSITORY DOWNLOAD]/app/index.html` directly in
+   Chrome or Edge -- replace the bracketed part with wherever you saved it
+   in step 1 (e.g. `C:\Users\You\Downloads\ulmodbuddy-main\app\index.html`).
+3. Same as steps 2-3 above.
 
-1. Download or clone this repository.
-2. Run the local server:
-   ```
-   python app/server.py
-   ```
-3. Open <http://localhost:8420> in your browser.
-4. The app will ask for your install folder the first time -- paste the
-   path and click **Build**. This reads your local install and generates
-   the data plus icons the app needs; it takes a few seconds.
+Chrome and Edge support the underlying browser API out of the box.
+**Brave** ships the same engine but disables it by default -- flip it on
+at `brave://flags/#file-system-access-api`, or just use Chrome/Edge.
+Firefox and Safari don't support it at all -- use Python below instead.
 
-That's it -- the app takes over once the build finishes. If you update
-the mod yourself later, click **Rebuild data** in the header to
-regenerate against your updated install.
+### Python
+
+Requirements: Python 3 (standard library only, nothing to install) and
+the same install described above.
+
+1. Download or clone this repository somewhere on your computer.
+2. Run `python [PATH TO THE REPOSITORY DOWNLOAD]/app/server.py` --
+   replace the bracketed part with wherever you saved it in step 1.
+3. Open <http://localhost:8420>, paste your install path, and click
+   **Build**.
+
+Click **Rebuild data** in the header any time you update the mod.
 
 ## Privacy & security
 
@@ -100,22 +92,26 @@ regenerate against your updated install.
   itself -- no game files, mod files, or extracted images are included or
   ever committed. You grant the app read access to your own, legally-owned
   install, and everything is built from those files on your own machine.
-- **Nothing is ever uploaded anywhere.** The zero-install flow runs
-  entirely in your browser; the Python fallback runs entirely on
-  `localhost`. Neither one talks to any server other than the one serving
+- **Nothing is ever uploaded anywhere.** Zero download and zero install
+  both run entirely in your browser; Python runs entirely on `localhost`.
+  None of the three ever talks to any server other than the one serving
   the app's own static files.
-- **Access is read-only and explicitly granted.** In the zero-install flow,
-  your browser shows a permission prompt before the app can read your
-  install folder, and the tool never writes to it. The Python fallback
-  copies icon files into a local `app/icons` folder so your own browser can
-  display them -- that folder stays on your machine, is never committed
-  (see `.gitignore`), and is never sent anywhere.
+- **Access is read-only and explicitly granted.** In the browser-based
+  flows, your browser shows a permission prompt before the app can read
+  your install folder, and the tool never writes to it. The Python flow
+  copies icon files into a local `app/icons` folder so your own browser
+  can display them -- that folder stays on your machine, is never
+  committed (see `.gitignore`), and is never sent anywhere.
 
 ## Notes
 
-- Only tested on desktop, with Chrome or Edge; the Python fallback is
-  needed for other browsers -- see above.
+- Desktop only -- not tested on phones or tablets, and the browser-based
+  setups rely on an API mobile browsers largely don't support yet.
 - Every warning about the mod's own data (unresolved references, likely
   typos, missing localization) is visible in-app via the "N build
   warning(s)" link in the header, not just in a terminal.
+- **Loot odds are inferred, not verified.** The numbers behind Loot
+  Sources are reverse-engineered from the mod's own loot-group data, not
+  confirmed by play-testing -- treat them as a guide to where to look,
+  not gospel.
 - See [CHANGELOG.md](CHANGELOG.md) for release history.

@@ -3,6 +3,28 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.1] - 2026-09-30
+
+### Changed
+
+- **README rewritten for a quick read.** Leads with what the app is and
+  why you'd want it, a tight Highlights list (emphasizing the two
+  acquisition questions every item answers -- how do you get it, and what
+  do you get from it), and a hobby-project disclaimer, instead of one long
+  wall of setup prose. Setup is now split into three clearly separate
+  paths -- Zero download, Zero install, Python -- each with its own short
+  steps; the two file-path-based steps spell out a literal placeholder
+  (`[PATH TO THE REPOSITORY DOWNLOAD]`) with a worked example, for anyone
+  less comfortable finding a downloaded folder's own path themselves.
+- **GUIDE.md now opens with the actual first-run build walkthrough** (the
+  Build UL Mod Buddy Data modal, picking your install folder or using the
+  Python form) instead of just pointing back at the README -- the User
+  Guide is now a self-contained "how do I use this app" document from the
+  very first step.
+- Noted in the README that Loot Sources numbers are inferred from the
+  mod's own data, not confirmed by play-testing -- the same caveat
+  already given in-app and in the Guide, now called out up front too.
+
 ## [1.3.0] - 2026-09-30
 
 ### Added

@@ -1,12 +1,38 @@
 # UL Mod Buddy -- User Guide
 
-This walks through what the app actually does once it's built its dataset
-from your install. For getting it running in the first place, see the
-[README](README.md).
-
 This guide (and the app itself) assumes a desktop browser -- it hasn't
 been tested on phones or tablets, and setup in particular relies on a
 browser API mobile browsers largely don't support yet.
+
+## Building your dataset
+
+The app ships with no data of its own -- the very first thing it does on
+a fresh page load is ask you to point it at your own *7 Days to Die* +
+Undead Legacy install, so it can build its reference data straight from
+the files you actually have installed. See the
+**[README](README.md#which-setup-do-i-need)** for the three ways to run
+the app (Zero download, Zero install, or Python) and which fits your
+browser; whichever you pick, the first-run experience is the same:
+
+1. The app opens a **Build UL Mod Buddy Data** modal automatically --
+   there's nothing to look at yet, so it can't be dismissed until a build
+   succeeds.
+
+   ![Build UL Mod Buddy Data modal on a first run, showing just the "Choose your install folder..." button](docs/screenshots/build-data-modal.png)
+
+2. In Chrome or Edge, click **Choose your install folder...** and pick
+   the folder containing both `Mods\UndeadLegacy` and `Data`; your browser
+   will ask you to confirm read access. In the Python setup, paste that
+   same folder's path into the form instead and click **Build**.
+3. The app reads your install and builds its entire dataset -- recipes,
+   research, icons, and everything else this guide covers -- in a few
+   seconds, then takes over automatically.
+
+Your install folder and the built dataset are both remembered for next
+time, so a returning visit skips straight to the app with no need to
+repeat this. If you ever update the mod yourself, click **Rebuild data**
+in the header to regenerate against your updated install -- see
+[Keeping the data current](#keeping-the-data-current) below.
 
 ## Searching and filtering
 
@@ -195,11 +221,11 @@ Click the column headers to re-sort by a different stat.
 If you've updated the mod, or reinstalled it to a new location, click
 **Rebuild data** in the header to have the app pick that up.
 
-If you're using the zero-install setup (Chrome or Edge), you get two
-choices, with a "Current folder: \<name\>" line above them once one's been
-picked before -- just the folder's own name, since browsers never hand a
-page its full path, but enough to tell two similarly-named install
-folders apart:
+If you're using Zero download or Zero install (Chrome or Edge either way),
+you get two choices, with a "Current folder: \<name\>" line above them
+once one's been picked before -- just the folder's own name, since
+browsers never hand a page its full path, but enough to tell two
+similarly-named install folders apart:
 
 ![Rebuild data modal offering "Rebuild from current folder" or "Choose a different folder..."](docs/screenshots/rebuild-data-modal.png)
 
@@ -210,9 +236,9 @@ folders apart:
   to a different install entirely (e.g. comparing a live install against
   a test/clone one).
 
-If you're using the Python fallback instead, **Rebuild data** brings back
-the same install-path form from setup -- edit the path if needed (or leave
-it as-is to rebuild from the same install) and click **Build**.
+If you're using Python instead, **Rebuild data** brings back the same
+install-path form from setup -- edit the path if needed (or leave it
+as-is to rebuild from the same install) and click **Build**.
 
 The "built \<timestamp\> from UndeadLegacy X.Y.Z" line in the header shows
 the mod's own declared version, per its `ModInfo.xml` -- the mod's author
