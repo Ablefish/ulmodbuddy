@@ -58,6 +58,7 @@ MOD_VEHICLES_FILE = BASE_VEHICLES_FILE = None
 VEHICLE_BLOCKS_FILE = RECIPE_VEHICLES_FILE = None
 ENTITY_CLASSES_FILE = BASE_ENTITY_CLASSES_FILE = None
 LOOT_TEMPLATES_FILE = None
+BLOCK_PLACEHOLDERS_FILE = BASE_BLOCK_PLACEHOLDERS_FILE = None
 
 
 class InstallRootError(ValueError):
@@ -104,6 +105,7 @@ def configure_paths(install_root):
     global VEHICLE_BLOCKS_FILE, RECIPE_VEHICLES_FILE
     global ENTITY_CLASSES_FILE, BASE_ENTITY_CLASSES_FILE
     global LOOT_TEMPLATES_FILE
+    global BLOCK_PLACEHOLDERS_FILE, BASE_BLOCK_PLACEHOLDERS_FILE
 
     SRC = Path(install_root)
     MOD_ROOT = SRC / "Mods" / "UndeadLegacy"
@@ -207,6 +209,16 @@ def configure_paths(install_root):
     # ones (including several UL-only templates like "baseProbTemplate")
     # live in this one file instead. See load_loot_templates().
     LOOT_TEMPLATES_FILE = CONFIG / "Custom" / "loot_templates.xml"
+    # "Place this abstract stub in a POI, swap it for one of these real
+    # candidates at world-gen time" -- a player never actually encounters
+    # the placeholder/randomizer itself. See load_block_placeholders().
+    # Base game uses <placeholder name="X"><block name="Y" prob="p"/></...>;
+    # the mod's own file (an <append xpath="/blockplaceholders"> adding
+    # ~200 more on top, never overriding the base game's) uses the same
+    # <block name/prob> child shape under a differently-named <randomizer>
+    # element instead -- both scanned, treated identically.
+    BLOCK_PLACEHOLDERS_FILE = CONFIG / "blockplaceholders.xml"
+    BASE_BLOCK_PLACEHOLDERS_FILE = SRC / "Data" / "Config" / "blockplaceholders.xml"
 
 
 def _read_local_config():
@@ -891,11 +903,83 @@ def _load_container_to_items():
     return containers
 
 
-def _load_block_to_lootlist():
+# ---------------------------------------------------------------------------
+# Block placeholders -- <placeholder>/<randomizer> in blockplaceholders.xml.
+# A POI places this abstract stub; the game swaps it for one of its listed
+# <block> candidates (by probability) at world-generation time. The stub
+# name itself is never what a player finds in a finished world, but it's a
+# perfectly ordinary, independently-scannable <block> in its own right (with
+# its own LootList/Material/Weight/drop properties, sometimes the ONLY place
+# those properties are stated directly rather than inherited) -- so every
+# one of harvest/loot/recycle/scrap's own scans picks it up as if it were a
+# real, distinct source. Confirmed empirically: ~50,000 loot-source rows,
+# plus dozens of harvest/recycle/scrap rows, reference a placeholder name
+# across a real install. resolve_block_placeholder() swaps it for its
+# representative candidate wherever a source name is recorded, so the app
+# shows what a player actually encounters (e.g. "Rotten Chest") instead of
+# the stub's own internal name and its openly-authoring-only localized
+# label ("= Rotten Chest = Random Helper").
+# ---------------------------------------------------------------------------
+def load_block_placeholders():
+    """Returns {placeholder_name: representative_block_name}: one real
+    candidate per placeholder/randomizer, chosen as the highest-probability
+    <block> child (ties broken by name, for determinism) -- "which skin is
+    most likely what a player actually sees" is as good a single
+    representative as any, and matches this codebase's existing "pick one
+    representative" convention for variant-skin icon fallback."""
+    reps = {}
+    for path in (BASE_BLOCK_PLACEHOLDERS_FILE, BLOCK_PLACEHOLDERS_FILE):
+        if not path or not path.exists():
+            continue
+        text = read_text(path)
+        for tag in ("placeholder", "randomizer"):
+            for frag in scan_blocks(text, tag):
+                el = parse_fragment(frag, path.name)
+                if el is None:
+                    continue
+                name = el.attrib.get("name")
+                if not name:
+                    continue
+                best, best_prob = None, -1.0
+                for child in el:
+                    if child.tag != "block":
+                        continue
+                    cname = child.attrib.get("name")
+                    if not cname:
+                        continue
+                    prob = _safe_float(
+                        child.attrib.get("prob", "1"), 1.0,
+                        f"{path.name} <{tag} name=\"{name}\"> <block name=\"{cname}\"> prob"
+                    )
+                    if prob > best_prob or (prob == best_prob and (best is None or cname < best)):
+                        best, best_prob = cname, prob
+                if best:
+                    reps[name] = best
+    return reps
+
+
+def resolve_block_placeholder(name, placeholders):
+    """Swaps a placeholder/randomizer's own name for its representative real
+    candidate -- a no-op for any name that isn't one. Chains through a
+    candidate that's itself a placeholder (none currently in the mod's own
+    data, but cheap to guard against), stopping rather than looping forever
+    if a future data change ever created a cycle."""
+    seen = set()
+    while name in placeholders and name not in seen:
+        seen.add(name)
+        name = placeholders[name]
+    return name
+
+
+def _load_block_to_lootlist(placeholders):
     """Returns {block_name: lootcontainer_name} -- literal <block>
     elements' own LootList property only, the same scope limit as
     load_harvest_sources' entity_class scan: a block that inherits
-    LootList only via an Extends chain (some do) isn't walked here."""
+    LootList only via an Extends chain (some do) isn't walked here. Any
+    block name that's itself a placeholder (see load_block_placeholders) is
+    resolved to its representative candidate before being used as the dict
+    key, so a container reachable only through a placeholder's own LootList
+    still surfaces under the name a player would actually recognize."""
     block_to_lootlist = {}
     for path in (BASE_BLOCK_FILE, *BLOCK_FILES):
         if not path or not path.exists():
@@ -910,7 +994,7 @@ def _load_block_to_lootlist():
                 continue
             for prop in el.iter("property"):
                 if prop.attrib.get("name") == "LootList" and prop.attrib.get("value"):
-                    block_to_lootlist[name] = prop.attrib["value"]
+                    block_to_lootlist[resolve_block_placeholder(name, placeholders)] = prop.attrib["value"]
                     break
     return block_to_lootlist
 
@@ -965,9 +1049,10 @@ def load_loot_sources():
     through an unresolved Extends chain) -- an unreachable container name
     would be noise, not help, the same call already made for the
     standalone loot-source prototype this replaces."""
+    placeholders = load_block_placeholders()
     containers = _load_container_to_items()
     container_to_blocks = {}
-    for block_name, container_name in _load_block_to_lootlist().items():
+    for block_name, container_name in _load_block_to_lootlist(placeholders).items():
         container_to_blocks.setdefault(container_name, []).append(block_name)
     container_to_entities = {}
     for entity_name, container_names in _load_entity_kill_to_container().items():
@@ -1099,30 +1184,61 @@ def _collapse_same_block_events(sources):
     return out
 
 
-def collapse_source_lookalikes(sources_map, names, icons, key="block"):
-    """Second, broader dedup pass -- run after icons are resolved, unlike
-    _collapse_tier_variants which runs during extraction. Some duplicate
-    block/item pairs share no name-root at all (cementMixer vs the
-    unrelated-looking ulmStationCementMixerPowered), so the tier-suffix
-    regex above never groups them -- but they still render as the exact
-    same "Cement Mixer" row with the same icon and the same yield, which
-    reads as a bug ("why is this here twice?") even though it technically
-    isn't one. Any group sharing (display name, icon, event, count, prob)
-    collapses to one row; two icon-less entries only merge this way if
-    their display names ALSO match, so it's still a tight match despite the
-    weaker key. Shared between harvest and recycle sources -- same pattern,
-    same fix. Mutates `sources_map` in place and returns it, purely for
-    chaining."""
+def collapse_source_lookalikes(sources_map, names, key="block"):
+    """Second, broader dedup pass. Some duplicate block/item pairs share no
+    name-root at all (cementMixer vs the unrelated-looking
+    ulmStationCementMixerPowered), so the tier-suffix regex above never
+    groups them -- but they still render as the exact same row with the
+    same yield, which reads as a bug ("why is this here twice?") even
+    though it technically isn't one. Any group sharing (display name,
+    event, count, prob) collapses to one row, keeping the first-seen entry.
+
+    Earlier versions of this also required the resolved ICON to match,
+    which seemed like a natural extra safety margin -- but it's exactly
+    what let real duplicates slip through: two genuinely distinct block IDs
+    can share one display name AND one yield while using two different
+    icon files for what the mod authors themselves didn't bother to
+    visually or verbally distinguish further (e.g. Mechanical Parts'
+    "Black Wall Valve" harvest source is really pipeSmallWallValveSwitch
+    AND pipeSmallWallValve02Switch, two different icons, same name, same
+    0-1x drop). The same pattern explains most of this function's hits:
+    a vehicle's dozen paint-color variants, or a group of containers that
+    are cosmetic reskins of each other, all sharing one representative
+    display name and one yield across genuinely different internal IDs.
+    Once the name and yield already match, the icon was never doing
+    useful disambiguation -- a player can't tell two sources apart by name
+    and count alone just because their icons happen to differ, so showing
+    them as one row is the correct read, not a lossy compromise.
+
+    Dropping the icon requirement also means this no longer needs to wait
+    for icon resolution (a late, whole-dataset phase) -- the caller runs it
+    right after `names` is fully resolved (including the Extends-chain
+    fallback backfill), well before icon resolution starts, so a duplicate
+    is caught as part of assembling this data rather than bolted onto the
+    very end of the pipeline as a cleanup pass over an already-finished
+    list. It does still need to wait for THAT backfill specifically (not
+    run inside harvest/recycle/scrap's own loaders) -- a pair like
+    plantedAloe3Harvest / plantedAloe3HarvestPlayer has no localization
+    entry of its own for one side until the fallback runs, so collapsing
+    any earlier would compare a real display name against the other's raw
+    internal name and miss the match.
+
+    Shared by harvest/recycle/scrap sources -- same pattern, same fix.
+    Mutates `sources_map` in place; returns how many rows were removed, for
+    the caller to log."""
+    removed = 0
     for sources in sources_map.values():
         seen = {}
         order = []
         for s in sources:
-            dedup_key = (names.get(s[key], s[key]), icons.get(s[key]), s.get("event"), s["countMin"], s["countMax"], s["prob"])
+            dedup_key = (names.get(s[key], s[key]), s.get("event"), s["countMin"], s["countMax"], s["prob"])
             if dedup_key not in seen:
                 seen[dedup_key] = s
                 order.append(dedup_key)
+            else:
+                removed += 1
         sources[:] = [seen[k] for k in order]
-    return sources_map
+    return removed
 
 
 def load_harvest_sources():
@@ -1153,7 +1269,12 @@ def load_harvest_sources():
         not a real source; a name
         that's ALSO positively dropped by some other block still ends up in
         the set via that other <drop>, so this only ever removes rows that
-        are exclusively zero everywhere.
+        are exclusively zero everywhere. A block name that's itself a
+        placeholder/randomizer (see load_block_placeholders) is resolved to
+        its representative real candidate before being stored, so a drop
+        table authored directly on a world-gen stub still surfaces under
+        the name a player would actually recognize -- never the entity_class
+        pass below, since a creature is never a block placeholder.
 
         A second pass folds in entity_class butcher-corpse drops (Data/Config
         + Mods/UndeadLegacy/Config entityclasses.xml) into this SAME map --
@@ -1165,6 +1286,7 @@ def load_harvest_sources():
         missed, but every case checked in the mod's own file (e.g. all four
         Scorpion color variants) repeats its full drop list explicitly.
     """
+    placeholders = load_block_placeholders()
     harvestable = set()
     harvest_sources = {}
     for path in BLOCK_FILES:
@@ -1173,7 +1295,7 @@ def load_harvest_sources():
             continue
         text = read_text(path)
         for tag, name_a, name_b, body in BLOCK_TAG_RE.findall(text):
-            block_name = name_a or name_b
+            block_name = resolve_block_placeholder(name_a or name_b, placeholders)
             if not block_name:
                 continue
             for frag in scan_blocks(body, "drop"):
@@ -1288,7 +1410,14 @@ def load_recycle_data():
         high/medium/low bucketing -- so it renders through the identical
         modal component. No same-block-event collapse here (recycle has no
         Harvest/Destroy/Fall concept, just one profile per item).
+
+        Input and output names are both resolved through
+        resolve_block_placeholder() -- some recycler recipes list a block
+        placeholder/randomizer's own internal name directly as an input,
+        which should recycle as whatever real candidate a player actually
+        finds, not the world-gen stub.
     """
+    placeholders = load_block_placeholders()
     recycle_yields = {}
     recycle_sources = {}
     if not RECYCLE_FILE.exists():
@@ -1299,10 +1428,13 @@ def load_recycle_data():
         el = parse_fragment(frag, RECYCLE_FILE.name)
         if el is None:
             continue
-        input_names = [n.strip() for n in el.attrib.get("name", "").split(",") if n.strip()]
+        input_names = [
+            resolve_block_placeholder(n.strip(), placeholders)
+            for n in el.attrib.get("name", "").split(",") if n.strip()
+        ]
         outputs = []
         for out_el in el.findall("output"):
-            out_name = out_el.attrib.get("name")
+            out_name = resolve_block_placeholder(out_el.attrib.get("name"), placeholders) if out_el.attrib.get("name") else None
             if not out_name:
                 continue
             count_attr = out_el.attrib.get("count")
@@ -1493,7 +1625,15 @@ def load_scrap_data(all_names, extends_map):
         identical source modal. Scrapping has no probability or count range
         (always the one fixed count for a given item) -- countMin/countMax/
         prob are just that count and 1.0, purely to fit the shared shape.
+
+        Both the scrapped name and its target are resolved through
+        resolve_block_placeholder() -- a block placeholder/randomizer can
+        carry its own Material/Weight (sometimes the only place those
+        properties are stated directly), so without this it would scrap as
+        itself under its own internal name/label instead of whatever real
+        candidate a player actually finds and scraps.
     """
+    placeholders = load_block_placeholders()
     forge_categories = load_material_forge_categories()
     props, all_ids = load_material_weight_props()
     scrap_yields = {}
@@ -1502,7 +1642,7 @@ def load_scrap_data(all_names, extends_map):
         material, weight = _resolve_material_weight(nm, props, extends_map)
         if not material or not weight:
             continue
-        target = resolve_scrap_target(forge_categories.get(material), all_ids)
+        target = resolve_block_placeholder(resolve_scrap_target(forge_categories.get(material), all_ids), placeholders)
         if not target:
             continue
         try:
@@ -1511,9 +1651,10 @@ def load_scrap_data(all_names, extends_map):
             continue
         if count < 1:
             count = 1
-        scrap_yields[nm] = {"name": target, "count": count}
+        resolved_nm = resolve_block_placeholder(nm, placeholders)
+        scrap_yields[resolved_nm] = {"name": target, "count": count}
         scrap_sources.setdefault(target, []).append({
-            "item": nm, "countMin": count, "countMax": count, "prob": 1.0,
+            "item": resolved_nm, "countMin": count, "countMax": count, "prob": 1.0,
         })
     for name, sources in scrap_sources.items():
         scrap_sources[name] = _collapse_tier_variants(sources, key="item")
@@ -2110,6 +2251,67 @@ BLOCK_TAG_RE = re.compile(
 )
 
 
+def load_interact_names():
+    """Returns {block_name: interact_target_name} -- the mod's own
+    InteractName property (block-only; 0 uses anywhere in the base game,
+    ~47 across the mod's own blocks.xml/Custom/blocks_vehicles.xml): an
+    explicit "when the player interacts with this, show them THIS OTHER
+    block's name instead" override, authored directly by the mod team --
+    the single most authoritative signal available for "what does a player
+    actually see," more reliable than both the Extends-chain name fallback
+    (a guess) and block-placeholder resolution (a probability-weighted
+    guess), because it's a deliberate author declaration rather than
+    inferred from nearby data.
+
+    E.g. ulmVehiclePoliceCruiserLootable (the real, directly-placed
+    wrecked/lootable car a player actually finds in the world) declares
+    InteractName="ulmVehiclePoliceCruiser" -- in-game this reads "Police
+    Cruiser," never the block's own internal-sounding localized label
+    ("Police Cruiser | Random Spawner," an editor/debug-only label the mod
+    authors use to tell variants apart in their own tools, never shown to
+    a player). The same convention also collapses plain numbered-variant
+    families the tier-suffix regex can't catch on its own (e.g.
+    ulmStorageTitaniumCrate1 and ulmStorageTitaniumDoubleCrate1 both
+    declare InteractName="ulmStorageTitanium").
+
+    Scanned the same way CanPickup is for variant-helper icons just below
+    (BLOCK_TAG_RE, <block>/<set>/<append> all included -- the property is
+    set via a direct block body AND via a <set>/<append> patch in
+    practice)."""
+    interact_names = {}
+    for path in BLOCK_FILES:
+        if not path.exists():
+            continue
+        text = read_text(path)
+        for tag, name_a, name_b, body in BLOCK_TAG_RE.findall(text):
+            name = name_a or name_b
+            if not name:
+                continue
+            m = re.search(r'InteractName" value="([^"]+)"', body)
+            if m:
+                interact_names[name] = m.group(1)
+    return interact_names
+
+
+def resolve_interact_name(name, interact_names, extends_map):
+    """Walks the Extends chain to find the nearest ancestor (including
+    `name` itself) that declares InteractName -- a block Extending one that
+    declares it inherits it too, same as any other unspecified property
+    under this mod's typical (param1-unrestricted) Extends usage. Caught a
+    real case: ulmVehicleSedan03Wide has no InteractName of its own, but
+    Extends ulmVehicleSedan03Lootable (InteractName="ulmVehicleSedan")
+    without restricting which properties carry over -- without this walk,
+    the "3 Wide" variant would have kept showing its own internal label."""
+    seen = set()
+    cur = name
+    while cur and cur not in seen:
+        seen.add(cur)
+        if cur in interact_names:
+            return interact_names[cur]
+        cur = extends_map.get(cur)
+    return None
+
+
 def load_variant_helper_candidates():
     helper_to_candidates = {}
     for path in BLOCK_FILES:
@@ -2535,6 +2737,51 @@ def main(install_root):
             + (" ..." if len(name_fallback_used) > 10 else "")
         )
 
+    # Applied after the Extends-chain fallback above (not before) so it wins
+    # even over a block that would otherwise have gotten a guessed fallback
+    # name -- InteractName is a deliberate author declaration, strictly more
+    # authoritative than either fallback mechanism. See load_interact_names()
+    # for the full writeup (e.g. the Police Cruiser wreck's own internal
+    # name localizes to "Police Cruiser | Random Spawner," an editor-only
+    # label, while its InteractName points at the plain "Police Cruiser").
+    # Only the name side runs here -- `icons` doesn't exist yet at this point
+    # in the pipeline, so the matching icon override runs later, right after
+    # icon resolution itself (see below).
+    interact_names = load_interact_names()
+    interact_name_overrides = 0
+    for nm in all_names:
+        target = resolve_interact_name(nm, interact_names, extends_map)
+        if target and target in names and names.get(nm) != names[target]:
+            names[nm] = names[target]
+            interact_name_overrides += 1
+    if interact_name_overrides:
+        print(f"  {interact_name_overrides} block(s) renamed via their own InteractName override "
+              f"(an explicit \"show this other block's name instead\" declaration)")
+
+    # Only safe to run now, not inside harvest/recycle/scrap's own loaders --
+    # it needs the FULLY resolved `names` dict (including the Extends-chain
+    # fallback names just backfilled above, and the InteractName overrides
+    # just applied above), not the raw localization-only snapshot those
+    # loaders ran against. A pair like plantedAloe3Harvest /
+    # plantedAloe3HarvestPlayer has no localization entry of its own for one
+    # side until that fallback runs, so collapsing any earlier would compare
+    # a real display name against the other's raw internal name and miss the
+    # match. Still runs well before icon resolution below, as part of
+    # assembling this data rather than a cosmetic pass over the finished
+    # dataset -- see collapse_source_lookalikes() for the matching logic.
+    harvest_lookalikes = collapse_source_lookalikes(harvest_sources, names, key="block")
+    if harvest_lookalikes:
+        print(f"  collapsed {harvest_lookalikes} look-alike harvest source row(s) "
+              f"(same display name/yield under a different internal block name)")
+    recycle_lookalikes = collapse_source_lookalikes(recycle_sources, names, key="item")
+    if recycle_lookalikes:
+        print(f"  collapsed {recycle_lookalikes} look-alike recycle source row(s) "
+              f"(same display name/yield under a different internal item name)")
+    scrap_lookalikes = collapse_source_lookalikes(scrap_sources, names, key="item")
+    if scrap_lookalikes:
+        print(f"  collapsed {scrap_lookalikes} look-alike scrap source row(s) "
+              f"(same display name/yield under a different internal item name)")
+
     fallback_used = []
     base_game_used = []
     extends_used = []
@@ -2573,6 +2820,24 @@ def main(install_root):
             f"(the mod patches the item without touching its inherited icon)"
         )
 
+    # Icon counterpart to the InteractName name override above -- deferred to
+    # here specifically because `icons` doesn't exist until the resolution
+    # loop just above has run. Safe even when it's a no-op (the InteractName
+    # convention usually already pairs with a matching CustomIcon on the
+    # block itself, so this often just confirms what icon resolution already
+    # found) and corrective when it isn't (a block relying on InteractName
+    # alone, with no matching CustomIcon of its own). The referenced icon
+    # file is always already slated for copying via the TARGET's own
+    # resolution, so reusing its path here never orphans a missing file.
+    interact_icon_overrides = 0
+    for nm in all_names:
+        target = resolve_interact_name(nm, interact_names, extends_map)
+        if target and target in icons and icons.get(nm) != icons[target]:
+            icons[nm] = icons[target]
+            interact_icon_overrides += 1
+    if interact_icon_overrides:
+        print(f"  {interact_icon_overrides} icon(s) matched to their InteractName target too")
+
     print("Copying referenced icon files...")
     ICONS_OUT.mkdir(parents=True, exist_ok=True)
     # Unconditional, not "if not dest.exists()": a rebuild after a mod update
@@ -2581,27 +2846,6 @@ def main(install_root):
     for stem, p in used_icons.items():
         shutil.copyfile(p, ICONS_OUT / p.name)
     print(f"  {len(used_icons)} icon files copied to {ICONS_OUT}")
-
-    before = sum(len(v) for v in harvest_sources.values())
-    collapse_source_lookalikes(harvest_sources, names, icons, key="block")
-    after = sum(len(v) for v in harvest_sources.values())
-    if before != after:
-        print(f"  collapsed {before - after} look-alike harvest source row(s) "
-              f"(same display name/icon/drop under a different internal block name)")
-
-    before = sum(len(v) for v in recycle_sources.values())
-    collapse_source_lookalikes(recycle_sources, names, icons, key="item")
-    after = sum(len(v) for v in recycle_sources.values())
-    if before != after:
-        print(f"  collapsed {before - after} look-alike recycle source row(s) "
-              f"(same display name/icon/yield under a different internal item name)")
-
-    before = sum(len(v) for v in scrap_sources.values())
-    collapse_source_lookalikes(scrap_sources, names, icons, key="item")
-    after = sum(len(v) for v in scrap_sources.values())
-    if before != after:
-        print(f"  collapsed {before - after} look-alike scrap source row(s) "
-              f"(same display name/icon/yield under a different internal item name)")
 
     # craftable duplicates recipes_by_name membership rather than reading it
     # at the point of use -- so every "how can I get this" question has one

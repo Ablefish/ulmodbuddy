@@ -40,7 +40,7 @@ A few things worth knowing about this page:
   always means "look up its own recipe" -- the other chips are described
   below.
 
-  ![Close-up of an ingredient row's chips: Recycle, Quest, Harvest, Craft, Loot, Buy](docs/screenshots/chips-all-types.png)
+  ![Close-up of an ingredient row's chips: Scrap, Recycle, Quest, Harvest, Craft, Loot, Buy](docs/screenshots/chips-all-types.png)
 
 - **The ▶ triangle** next to any craftable ingredient, workstation, or
   research step expands it into its *own* cost tree. Left collapsed, an
@@ -96,13 +96,15 @@ always where you should actually go looking first.
 
 ![Recycle Sources popup for Iron Plating, showing which items to break down and their yield tiers](docs/screenshots/recycle-sources.png)
 
+![Scrap Sources popup for Handgun Parts, showing the pistols that scrap into it, all in the High Yield tier](docs/screenshots/scrap-sources.png)
+
 ## Loot Sources
 
 The fourth clickable chip, **Loot**, opens a different kind of popup --
 every real container and kill that can actually drop the item, at a loot
 stage you pick:
 
-![Loot Sources popup for an item, showing the loot-stage picker and High/Medium/Low Chance sections](docs/screenshots/loot-sources.png)
+![Loot Sources popup for Falcon, showing the loot-stage picker and High/Medium Chance sections with Found In and Dropped By sublists](docs/screenshots/loot-sources.png)
 
 The **Loot stage** buttons jump straight to the real in-game stages where
 the next weapon/tool/armor tier switches on (not an even 0/50/100/150/200

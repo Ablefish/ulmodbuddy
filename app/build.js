@@ -222,6 +222,15 @@ window.ULModBuddyBuilder = (function () {
       // mod; the real ones (including several UL-only templates) live in
       // this one file instead. See loadLootTemplates().
       lootTemplatesFile: ref("Mods/UndeadLegacy/Config/Custom/loot_templates.xml", await tryGetFile(custom, "loot_templates.xml")),
+      // "Place this abstract stub in a POI, swap it for one of these real
+      // candidates at world-gen time" -- see loadBlockPlaceholders(). Base
+      // game uses <placeholder name="X"><block name="Y" prob="p"/></...>;
+      // the mod's own file (an <append xpath="/blockplaceholders"> adding
+      // ~200 more on top, never overriding the base game's) uses the same
+      // <block name/prob> child shape under a differently-named
+      // <randomizer> element instead -- both scanned, treated identically.
+      blockPlaceholdersFile: ref("Mods/UndeadLegacy/Config/blockplaceholders.xml", await tryGetFile(config, "blockplaceholders.xml")),
+      baseBlockPlaceholdersFile: ref("Data/Config/blockplaceholders.xml", await tryGetFile(dataConfig, "blockplaceholders.xml")),
     };
   }
 
@@ -813,11 +822,82 @@ window.ULModBuddyBuilder = (function () {
     return containers;
   }
 
+  // -------------------------------------------------------------------
+  // Block placeholders -- <placeholder>/<randomizer> in
+  // blockplaceholders.xml. A POI places this abstract stub; the game swaps
+  // it for one of its listed <block> candidates (by probability) at
+  // world-generation time. The stub name itself is never what a player
+  // finds in a finished world, but it's a perfectly ordinary,
+  // independently-scannable <block> in its own right (with its own
+  // LootList/Material/Weight/drop properties, sometimes the ONLY place
+  // those properties are stated directly rather than inherited) -- so
+  // every one of harvest/loot/recycle/scrap's own scans picks it up as if
+  // it were a real, distinct source. Confirmed empirically against a real
+  // install: tens of thousands of loot-source rows, plus dozens of
+  // harvest/recycle/scrap rows, reference a placeholder name.
+  // resolveBlockPlaceholder() swaps it for its representative candidate
+  // wherever a source name is recorded, so the app shows what a player
+  // actually encounters (e.g. "Rotten Chest") instead of the stub's own
+  // internal name and its openly-authoring-only localized label
+  // ("= Rotten Chest = Random Helper").
+  // -------------------------------------------------------------------
+
+  // Returns {placeholderName: representativeBlockName}: one real candidate
+  // per placeholder/randomizer, chosen as the highest-probability <block>
+  // child (ties broken by name, for determinism) -- "which skin is most
+  // likely what a player actually sees" is as good a single representative
+  // as any, and matches this codebase's existing "pick one representative"
+  // convention for variant-skin icon fallback.
+  async function loadBlockPlaceholders(paths) {
+    const reps = {};
+    for (const fileRef of [paths.baseBlockPlaceholdersFile, paths.blockPlaceholdersFile]) {
+      if (!fileRef.handle) continue;
+      const doc = await readAndParse(fileRef);
+      if (!doc) continue;
+      for (const tag of ["placeholder", "randomizer"]) {
+        for (const el of scanBlocks(doc, tag)) {
+          const name = attr(el, "name");
+          if (!name) continue;
+          let best = null, bestProb = -1;
+          for (const child of directChildren(el, "block")) {
+            const cname = attr(child, "name");
+            if (!cname) continue;
+            const prob = safeFloat(attr(child, "prob", "1"), 1, `${fileRef.label} <${tag} name="${name}"> <block name="${cname}"> prob`);
+            if (prob > bestProb || (prob === bestProb && (best === null || cname < best))) {
+              best = cname;
+              bestProb = prob;
+            }
+          }
+          if (best) reps[name] = best;
+        }
+      }
+    }
+    return reps;
+  }
+
+  // Swaps a placeholder/randomizer's own name for its representative real
+  // candidate -- a no-op for any name that isn't one. Chains through a
+  // candidate that's itself a placeholder (none currently in the mod's own
+  // data, but cheap to guard against), stopping rather than looping
+  // forever if a future data change ever created a cycle.
+  function resolveBlockPlaceholder(name, placeholders) {
+    const seen = new Set();
+    while (name in placeholders && !seen.has(name)) {
+      seen.add(name);
+      name = placeholders[name];
+    }
+    return name;
+  }
+
   // Returns {blockName: lootcontainerName} -- literal <block> elements'
   // own LootList property only, the same scope limit as loadHarvestSources'
   // entity_class scan: a block that inherits LootList only via an Extends
-  // chain (some do) isn't walked here.
-  async function loadBlockToLootList(paths) {
+  // chain (some do) isn't walked here. Any block name that's itself a
+  // placeholder (see loadBlockPlaceholders) is resolved to its
+  // representative candidate before being used as the dict key, so a
+  // container reachable only through a placeholder's own LootList still
+  // surfaces under the name a player would actually recognize.
+  async function loadBlockToLootList(paths, placeholders) {
     const blockToLootList = {};
     for (const fileRef of [paths.baseBlockFile, ...paths.blockFiles]) {
       if (!fileRef.handle) continue;
@@ -828,7 +908,7 @@ window.ULModBuddyBuilder = (function () {
         if (!name) continue;
         for (const prop of Array.from(el.getElementsByTagName("property"))) {
           if (attr(prop, "name") === "LootList" && attr(prop, "value")) {
-            blockToLootList[name] = attr(prop, "value");
+            blockToLootList[resolveBlockPlaceholder(name, placeholders)] = attr(prop, "value");
             break;
           }
         }
@@ -882,9 +962,10 @@ window.ULModBuddyBuilder = (function () {
   // through an unresolved Extends chain) -- an unreachable container name
   // would be noise, not help.
   async function loadLootSources(paths) {
+    const placeholders = await loadBlockPlaceholders(paths);
     const containers = await loadContainerToItems(paths);
     const containerToBlocks = {};
-    const blockToLootList = await loadBlockToLootList(paths);
+    const blockToLootList = await loadBlockToLootList(paths, placeholders);
     for (const blockName in blockToLootList) {
       const containerName = blockToLootList[blockName];
       (containerToBlocks[containerName] = containerToBlocks[containerName] || []).push(blockName);
@@ -1008,14 +1089,36 @@ window.ULModBuddyBuilder = (function () {
     return sourcesMap;
   }
 
-  function collapseSourceLookalikes(sourcesMap, names, icons, key) {
+  // Second, broader dedup pass. See build.py's collapse_source_lookalikes()
+  // for the full writeup: dropping the resolved ICON from the match key (an
+  // earlier version required it) is what catches the real duplicates --
+  // two genuinely distinct block/item IDs can share one display name AND
+  // one yield while using two different icon files (e.g. Mechanical
+  // Parts' "Black Wall Valve" harvest source is really
+  // pipeSmallWallValveSwitch AND pipeSmallWallValve02Switch), or a
+  // vehicle's dozen paint-color variants all sharing one representative
+  // name and yield. Once name and yield already match, a player can't
+  // tell the sources apart by icon alone, so one row is the correct read.
+  // Not needing icons also means this doesn't have to wait for the later
+  // icon-resolution phase -- but it DOES need to wait for `names` to be
+  // fully resolved (including the Extends-chain fallback backfill), so the
+  // caller runs this right after that backfill, not inside
+  // harvest/recycle/scrap's own loaders -- a pair like plantedAloe3Harvest
+  // / plantedAloe3HarvestPlayer has no localization entry of its own for
+  // one side until that fallback runs, so collapsing any earlier would
+  // compare a real display name against the other's raw internal name and
+  // miss the match. Still runs well before icon resolution, as part of
+  // assembling this data rather than a cleanup pass bolted onto the end.
+  // Mutates `sourcesMap` in place; returns how many rows were removed, for
+  // the caller to log.
+  function collapseSourceLookalikes(sourcesMap, names, key) {
+    let removed = 0;
     for (const sources of Object.values(sourcesMap)) {
       const seen = new Map();
       const order = [];
       for (const s of sources) {
         const dedupKey = JSON.stringify([
           names[s[key]] ?? s[key],
-          icons[s[key]] ?? null,
           s.event ?? null,
           s.countMin,
           s.countMax,
@@ -1024,12 +1127,14 @@ window.ULModBuddyBuilder = (function () {
         if (!seen.has(dedupKey)) {
           seen.set(dedupKey, s);
           order.push(dedupKey);
+        } else {
+          removed++;
         }
       }
       sources.length = 0;
       sources.push(...order.map((k) => seen.get(k)));
     }
-    return sourcesMap;
+    return removed;
   }
 
   // -------------------------------------------------------------------
@@ -1073,6 +1178,7 @@ window.ULModBuddyBuilder = (function () {
   // Harvestable -- <drop> inside <block>/<set>/<append> in blocks.xml files
   // -------------------------------------------------------------------
   async function loadHarvestSources(paths) {
+    const placeholders = await loadBlockPlaceholders(paths);
     const harvestable = new Set();
     const harvestSources = {};
     for (const fileRef of paths.blockFiles) {
@@ -1084,7 +1190,7 @@ window.ULModBuddyBuilder = (function () {
       if (!doc) continue;
       for (const tag of ["block", "set", "append"]) {
         for (const blockEl of scanBlocks(doc, tag)) {
-          const blockName = attr(blockEl, "name") || nameFromXpath(attr(blockEl, "xpath"));
+          const blockName = resolveBlockPlaceholder(attr(blockEl, "name") || nameFromXpath(attr(blockEl, "xpath")), placeholders);
           if (!blockName) continue;
           for (const el of Array.from(blockEl.getElementsByTagName("drop"))) {
             const name = attr(el, "name");
@@ -1145,15 +1251,20 @@ window.ULModBuddyBuilder = (function () {
   // Recycling -- <recycle><output/></recycle> in recipes_recycler.xml
   // -------------------------------------------------------------------
   async function loadRecycleData(paths) {
+    const placeholders = await loadBlockPlaceholders(paths);
     const recycleYields = {};
     const recycleSources = {};
     const doc = await readAndParse(paths.recycleFile);
     if (!doc) return { recycleYields, recycleSources };
     for (const el of scanBlocks(doc, "recycle")) {
-      const inputNames = attr(el, "name", "").split(",").map((n) => n.trim()).filter(Boolean);
+      const inputNames = attr(el, "name", "")
+        .split(",")
+        .map((n) => n.trim())
+        .filter(Boolean)
+        .map((n) => resolveBlockPlaceholder(n, placeholders));
       const outputs = [];
       for (const outEl of directChildren(el, "output")) {
-        const outName = attr(outEl, "name");
+        const outName = attr(outEl, "name") ? resolveBlockPlaceholder(attr(outEl, "name"), placeholders) : null;
         if (!outName) continue;
         let countAttr = attr(outEl, "count");
         let probAttr = attr(outEl, "prob", "1");
@@ -1301,6 +1412,7 @@ window.ULModBuddyBuilder = (function () {
   // (always the one fixed count for a given item) -- countMin/countMax/
   // prob are just that count and 1, purely to fit the shared shape.
   async function loadScrapData(paths, allNames, extendsMap) {
+    const placeholders = await loadBlockPlaceholders(paths);
     const forgeCategories = await loadMaterialForgeCategories(paths);
     const { props, allIds } = await loadMaterialWeightProps(paths);
     const scrapYields = {};
@@ -1308,14 +1420,15 @@ window.ULModBuddyBuilder = (function () {
     for (const nm of allNames) {
       const [material, weight] = resolveMaterialWeight(nm, props, extendsMap);
       if (!material || !weight) continue;
-      const target = resolveScrapTarget(forgeCategories[material], allIds);
+      const target = resolveBlockPlaceholder(resolveScrapTarget(forgeCategories[material], allIds), placeholders);
       if (!target) continue;
       const count = Math.ceil(parseFloat(weight) / 10);
       if (!Number.isFinite(count)) continue;
       const clampedCount = Math.max(1, count);
-      scrapYields[nm] = { name: target, count: clampedCount };
+      const resolvedNm = resolveBlockPlaceholder(nm, placeholders);
+      scrapYields[resolvedNm] = { name: target, count: clampedCount };
       (scrapSources[target] = scrapSources[target] || []).push({
-        item: nm, countMin: clampedCount, countMax: clampedCount, prob: 1,
+        item: resolvedNm, countMin: clampedCount, countMax: clampedCount, prob: 1,
       });
     }
     for (const name in scrapSources) {
@@ -1741,6 +1854,65 @@ window.ULModBuddyBuilder = (function () {
     return { extendsMap, childrenMap };
   }
 
+  // Returns {blockName: interactTargetName} -- the mod's own InteractName
+  // property (block-only; 0 uses anywhere in the base game, ~47 across the
+  // mod's own blocks.xml/Custom/blocks_vehicles.xml): an explicit "when the
+  // player interacts with this, show them THIS OTHER block's name instead"
+  // override, authored directly by the mod team -- the single most
+  // authoritative signal available for "what does a player actually see,"
+  // more reliable than both the Extends-chain name fallback (a guess) and
+  // block-placeholder resolution (a probability-weighted guess), because
+  // it's a deliberate author declaration rather than inferred from nearby
+  // data. E.g. ulmVehiclePoliceCruiserLootable (the real, directly-placed
+  // wrecked/lootable car a player actually finds in the world) declares
+  // InteractName="ulmVehiclePoliceCruiser" -- in-game this reads "Police
+  // Cruiser," never the block's own internal-sounding localized label
+  // ("Police Cruiser | Random Spawner," an editor/debug-only label the mod
+  // authors use to tell variants apart in their own tools, never shown to
+  // a player). Scanned the same way CanPickup is just below (<block>/<set>/
+  // <append> all included -- the property is set via a direct block body
+  // AND via a <set>/<append> patch in practice).
+  async function loadInteractNames(paths) {
+    const interactNames = {};
+    for (const fileRef of paths.blockFiles) {
+      if (!fileRef.handle) continue;
+      const doc = await readAndParse(fileRef);
+      if (!doc) continue;
+      for (const tag of BLOCK_TAGS) {
+        for (const el of scanBlocks(doc, tag)) {
+          const name = attr(el, "name") || nameFromXpath(attr(el, "xpath"));
+          if (!name) continue;
+          for (const prop of Array.from(el.getElementsByTagName("property"))) {
+            if (attr(prop, "name") === "InteractName" && attr(prop, "value")) {
+              interactNames[name] = attr(prop, "value");
+              break;
+            }
+          }
+        }
+      }
+    }
+    return interactNames;
+  }
+
+  // Walks the Extends chain to find the nearest ancestor (including `name`
+  // itself) that declares InteractName -- a block Extending one that
+  // declares it inherits it too, same as any other unspecified property
+  // under this mod's typical (param1-unrestricted) Extends usage. Caught a
+  // real case: ulmVehicleSedan03Wide has no InteractName of its own, but
+  // Extends ulmVehicleSedan03Lootable (InteractName="ulmVehicleSedan")
+  // without restricting which properties carry over -- without this walk,
+  // the "3 Wide" variant would have kept showing its own internal label.
+  function resolveInteractName(name, interactNames, extendsMap) {
+    const seen = new Set();
+    let cur = name;
+    while (cur && !seen.has(cur)) {
+      seen.add(cur);
+      if (cur in interactNames) return interactNames[cur];
+      cur = extendsMap[cur];
+    }
+    return null;
+  }
+
   async function loadVariantHelperCandidates(paths) {
     const helperToCandidates = {};
     for (const fileRef of paths.blockFiles) {
@@ -2096,6 +2268,46 @@ window.ULModBuddyBuilder = (function () {
       );
     }
 
+    // Applied after the Extends-chain fallback above (not before) so it
+    // wins even over a block that would otherwise have gotten a guessed
+    // fallback name -- InteractName is a deliberate author declaration,
+    // strictly more authoritative than either fallback mechanism. See
+    // loadInteractNames() for the full writeup. Only the name side runs
+    // here -- `icons` doesn't exist yet at this point, so the matching icon
+    // override runs later, right after icon resolution itself (see below).
+    const interactNames = await loadInteractNames(paths);
+    let interactNameOverrides = 0;
+    for (const nm of allNames) {
+      const target = resolveInteractName(nm, interactNames, extendsMap);
+      if (target && names[target] && names[nm] !== names[target]) {
+        names[nm] = names[target];
+        interactNameOverrides++;
+      }
+    }
+    if (interactNameOverrides) {
+      log(`  ${interactNameOverrides} block(s) renamed via their own InteractName override (an explicit "show this other block's name instead" declaration)`);
+    }
+
+    // Only safe to run now, not inside harvest/recycle/scrap's own loaders --
+    // see build.py's call site for why (it needs the FULLY resolved `names`
+    // dict, including the Extends-chain fallback names just backfilled
+    // above, and the InteractName overrides just applied above, not the
+    // raw localization-only snapshot those loaders ran against). Still runs
+    // well before icon resolution below, as part of assembling this data
+    // rather than a cosmetic pass over the finished dataset.
+    const harvestLookalikes = collapseSourceLookalikes(harvestSources, names, "block");
+    if (harvestLookalikes) {
+      log(`  collapsed ${harvestLookalikes} look-alike harvest source row(s) (same display name/yield under a different internal block name)`);
+    }
+    const recycleLookalikes = collapseSourceLookalikes(recycleSources, names, "item");
+    if (recycleLookalikes) {
+      log(`  collapsed ${recycleLookalikes} look-alike recycle source row(s) (same display name/yield under a different internal item name)`);
+    }
+    const scrapLookalikes = collapseSourceLookalikes(scrapSources, names, "item");
+    if (scrapLookalikes) {
+      log(`  collapsed ${scrapLookalikes} look-alike scrap source row(s) (same display name/yield under a different internal item name)`);
+    }
+
     const icons = {};
     const iconBlobs = {};
     const fallbackUsed = [];
@@ -2134,28 +2346,30 @@ window.ULModBuddyBuilder = (function () {
     if (extendsUsed.length) {
       log(`  ${extendsUsed.length} icon(s) borrowed from a named Extends ancestor (the mod patches the item without touching its inherited icon)`);
     }
+
+    // Icon counterpart to the InteractName name override above -- deferred
+    // to here specifically because `icons` doesn't exist until the
+    // resolution loop just above has run. Safe even when it's a no-op (the
+    // InteractName convention usually already pairs with a matching
+    // CustomIcon on the block itself) and corrective when it isn't (a block
+    // relying on InteractName alone, with no matching CustomIcon of its
+    // own). The referenced icon is always already slated for use via the
+    // TARGET's own resolution, so reusing its url/blob here never orphans
+    // anything.
+    let interactIconOverrides = 0;
+    for (const nm of allNames) {
+      const target = resolveInteractName(nm, interactNames, extendsMap);
+      if (target && icons[target] && icons[nm] !== icons[target]) {
+        icons[nm] = icons[target];
+        if (iconBlobs[target]) iconBlobs[nm] = iconBlobs[target];
+        interactIconOverrides++;
+      }
+    }
+    if (interactIconOverrides) {
+      log(`  ${interactIconOverrides} icon(s) matched to their InteractName target too`);
+    }
+
     log(`  ${usedIcons.size} unique icon file(s) referenced (served directly from your install, never copied)`);
-
-    let before = Object.values(harvestSources).reduce((s, v) => s + v.length, 0);
-    collapseSourceLookalikes(harvestSources, names, icons, "block");
-    let after = Object.values(harvestSources).reduce((s, v) => s + v.length, 0);
-    if (before !== after) {
-      log(`  collapsed ${before - after} look-alike harvest source row(s) (same display name/icon/drop under a different internal block name)`);
-    }
-
-    before = Object.values(recycleSources).reduce((s, v) => s + v.length, 0);
-    collapseSourceLookalikes(recycleSources, names, icons, "item");
-    after = Object.values(recycleSources).reduce((s, v) => s + v.length, 0);
-    if (before !== after) {
-      log(`  collapsed ${before - after} look-alike recycle source row(s) (same display name/icon/yield under a different internal item name)`);
-    }
-
-    before = Object.values(scrapSources).reduce((s, v) => s + v.length, 0);
-    collapseSourceLookalikes(scrapSources, names, icons, "item");
-    after = Object.values(scrapSources).reduce((s, v) => s + v.length, 0);
-    if (before !== after) {
-      log(`  collapsed ${before - after} look-alike scrap source row(s) (same display name/icon/yield under a different internal item name)`);
-    }
 
     const craftable = new Set(Object.keys(recipesByName));
     const acquisition = {};
