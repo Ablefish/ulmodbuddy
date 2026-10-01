@@ -43,6 +43,21 @@ follows [Keep a Changelog](https://keepachangelog.com/).
   Iron -- which had no other recipe at all -- now correctly shows as a
   plain acquired item; Fabric now shows only its real Tailor's Station
   recipe instead of a confusing, costless second variant.
+- **Harvest/Loot/Recycle/Scrap Sources no longer show duplicate or
+  dev-label rows.** Three separate causes, all fixed: a dedup pass that
+  used to require two sources' resolved ICON to also match, which let real
+  duplicates through whenever two distinct blocks shared a name and yield
+  but different icon files (Mechanical Parts' "Black Wall Valve," several
+  vehicle color-variant explosions); 7 Days To Die's block-placeholder
+  system (an abstract stub a POI places that the game swaps for a real
+  candidate at world-gen time, never seen by a player) being scanned as if
+  it were a real, independent source, surfacing its own openly-internal
+  label ("= Rotten Chest = Random Helper"); and the mod's own
+  `InteractName` property -- an explicit "show the player this other
+  block's name instead" override (e.g. a wrecked Police Cruiser read
+  "Police Cruiser | Random Spawner," an editor-only label, instead of
+  "Police Cruiser") -- not being read at all. Loot Sources alone dropped
+  from roughly 50,000 raw affected rows to zero on a real install.
 
 ## [1.2.0] - 2026-09-16
 
