@@ -3,6 +3,16 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.3] - 2026-10-03
+
+### Changed
+
+- README and Guide now say plainly what the build touches -- only XML
+  config files, localization text, and icon images from your install,
+  nothing else -- and that the app has only been tested against a clean
+  Undead Legacy install with no other mods, so a heavily modded install
+  may give odd or missing results.
+
 ## [1.3.2] - 2026-10-02
 
 ### Changed

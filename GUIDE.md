@@ -28,6 +28,11 @@ browser; whichever you pick, the first-run experience is the same:
    research, icons, and everything else this guide covers -- in a few
    seconds, then takes over automatically.
 
+The build only reads XML config files, localization text, and icon
+images from your install -- nothing else. It's also only been tested
+against a clean Undead Legacy install with no other mods, so a heavily
+modded install may give odd or missing results.
+
 Your install folder and the built dataset are both remembered for next
 time, so a returning visit skips straight to the app with no need to
 repeat this. If you ever update the mod yourself, click **Rebuild data**
