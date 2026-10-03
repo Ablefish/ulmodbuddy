@@ -3,6 +3,15 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.2] - 2026-10-02
+
+### Changed
+
+- README polish: the Zero download heading now says up front that it's
+  Chrome or Edge only, "Notes" became **Notes & Caveats** (leading with
+  the fact that this is 100% a hobby project), and the two Highlights
+  questions now read "How do I get ____?" and "What can I get from ____?"
+
 ## [1.3.1] - 2026-09-30
 
 ### Changed

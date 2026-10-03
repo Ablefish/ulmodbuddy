@@ -11,9 +11,9 @@ screenshots.
 
 ## Highlights
 
-- **How do I get it?** -- every ingredient shows every way to acquire it:
+- **How do I get \_\_\_\_?** -- every ingredient shows every way to acquire it:
   Craft, Loot, Buy, Harvest, Recycle, Scrap, or Quest.
-- **What do I get *from* it?** -- the reverse question, answered too:
+- **What can I get from \_\_\_\_?** -- the reverse question, answered too:
   **Opens Into**, **Scraps Into**, and **Recycles Into** show what a
   bundle, ammo box, or breakdown actually yields.
 - **Full cost tree** -- search any item, research topic, or workstation
@@ -29,8 +29,8 @@ official tool, and not affiliated with The Fun Pimps or Subquake.
 
 ## Which setup do I need?
 
-- **[Zero download](#zero-download)** -- just open the hosted link. Chrome
-  or Edge only.
+- **[Zero download](#zero-download-chrome-or-edge)** -- just open the hosted
+  link. Chrome or Edge only.
 - **[Zero install](#zero-install)** -- download this repo and open a file.
   Still Chrome or Edge only, but nothing ever talks to the hosted site.
 - **[Python](#python)** -- for Firefox, Safari, or Brave without a flag
@@ -41,7 +41,7 @@ Either way, the app needs to read your own *7 Days to Die* + Undead
 Legacy install to build its data -- there's no bundled copy of the mod
 (see [Privacy & security](#privacy--security) below).
 
-### Zero download
+### Zero download (Chrome or Edge)
 
 1. Open **<https://ablefish.github.io/ulmodbuddy/>**.
 2. Click **Choose your install folder...** and pick your *7 Days to Die*
@@ -103,8 +103,9 @@ Click **Rebuild data** in the header any time you update the mod.
   can display them -- that folder stays on your machine, is never
   committed (see `.gitignore`), and is never sent anywhere.
 
-## Notes
+## Notes & Caveats
 
+- **This is 100% a hobby project!**
 - Desktop only -- not tested on phones or tablets, and the browser-based
   setups rely on an API mobile browsers largely don't support yet.
 - Every warning about the mod's own data (unresolved references, likely
