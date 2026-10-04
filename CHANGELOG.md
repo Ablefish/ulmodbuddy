@@ -3,6 +3,30 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.0] - 2026-10-03
+
+### Added
+
+- **Found in POIs** -- a block's page now ends (below Recycles Into) with
+  every POI that contains it, e.g. the desktop PC and the Monitor /
+  Keyboard / Mouse blocks. POIs are grouped High / Medium / Low by how many
+  of the block they hold, easiest first within each group, with the POI's
+  difficulty tier shown as skulls. Counted directly from each POI's prefab
+  block data during the build, so it also covers UL's own POIs. Only blocks
+  physically placed in a POI get it; nothing is inferred through loot or
+  harvest tables.
+- **POI thumbnails on hover** -- hover a POI row to see its own picture,
+  read on demand from your install (nothing is copied or stored). With the
+  browser-only setups, your browser may ask you to click the row once to
+  re-allow read access on a return visit.
+
+### Changed
+
+- Python server users get a small `/api/poi-image` endpoint that serves one
+  POI thumbnail from the install on request.
+- The build now also reads POI prefab block data from your install (it
+  only opens the prefabs that contain a block the app has a page for).
+
 ## [1.3.3] - 2026-10-03
 
 ### Changed

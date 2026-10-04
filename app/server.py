@@ -11,12 +11,14 @@ Run: python3 server.py [port]  (defaults to 8420)
 """
 import io
 import os
+import re
 import sys
 import json
 import traceback
 import threading
 import contextlib
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 APP_DIR = Path(__file__).resolve().parent
@@ -51,10 +53,37 @@ class ULModBuddyRequestHandler(SimpleHTTPRequestHandler):
         self.wfile.write(payload)
 
     def do_GET(self):
+        if self.path.startswith("/api/poi-image"):
+            self._send_poi_image()
+            return
         if self.path == "/api/config":
             self._send_json(200, {"installRoot": build_module._read_local_config().get("installRoot")})
             return
         super().do_GET()
+
+    def _send_poi_image(self):
+        """Serves one POI's <name>.jpg thumbnail straight from the install
+        (nothing is copied anywhere). The mod's own folder wins over the
+        base game's, same as for the prefab itself. The name is checked
+        against a strict pattern first, so it can never name a path."""
+        name = (parse_qs(urlparse(self.path).query).get("name") or [""])[0]
+        root = build_module._read_local_config().get("installRoot")
+        if not root or not re.fullmatch(r"[A-Za-z0-9_\-]+", name):
+            self.send_error(404)
+            return
+        root = Path(root)
+        for folder in (root / "Mods" / "UndeadLegacy" / "Prefabs" / "POIs", root / "Data" / "Prefabs" / "POIs"):
+            path = folder / f"{name}.jpg"
+            if path.is_file():
+                payload = path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Cache-Control", "max-age=86400")
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+        self.send_error(404)
 
     def do_POST(self):
         if self.path == "/api/build":

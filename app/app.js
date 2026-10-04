@@ -2648,10 +2648,188 @@ window.ULModBuddyApp = (function () {
       const recycleOutputs = data.recycleYields && data.recycleYields[name];
       html += `<div class="section-label" style="font-size:15px;color:var(--acq-recyclable);margin-top:20px;">Recycles Into${recycleOutputs ? ` (${recycleOutputs.length})` : ""}</div>`;
       html += renderRecycleYieldsCard(name);
+      html += renderPoiCard(name);
     }
 
     detailEl.innerHTML = html;
     renderTotalsPanel(report);
+  }
+
+  // "Found in POIs" -- every prefab (point of interest) that physically
+  // contains this block, from data.poiBlocks (counted straight out of each
+  // prefab's own block data at build time -- see build.js's loadPoiBlocks).
+  // Only ever present for a name that is itself a placed block, so items
+  // that exist only in inventory simply get no section. Grouped by how many
+  // of it each POI holds, bucketed High/Medium/Low relative to the POI with
+  // the most (same thresholds as Loot Sources' lootTierFor); within a
+  // bucket, lowest difficulty tier first, then most copies, then name. The POI's own DifficultyTier is shown as
+  // that many skull emoji on the right, like the in-game POI difficulty (an
+  // emoji rather than a game icon: the real skull sprite lives inside a Unity
+  // atlas that isn't extracted anywhere in the install). A
+  // placeholder/randomizer stub placed in a prefab counts toward its most
+  // likely real variant, like everywhere else a block is named here.
+  const POI_COUNT_SECTIONS = [
+    { tier: "high", label: "High Count" },
+    { tier: "medium", label: "Medium Count" },
+    { tier: "low", label: "Low Count" },
+  ];
+
+  function poiSkulls(tier) {
+    if (!tier) return "";
+    const label = `Difficulty tier ${tier}`;
+    return `<span class="source-row-meta poi-skulls" title="${label}" aria-label="${label}">${"💀".repeat(tier)}</span>`;
+  }
+
+  // Hover preview of a POI's own <name>.jpg thumbnail -- read on demand,
+  // never stored in the dataset. Where it comes from, in order:
+  //   1. the install folder the browser build was pointed at (the saved
+  //      FileSystemDirectoryHandle in storage.js), but only if the browser
+  //      still has read access granted -- a hover can't ask for it (that
+  //      needs a click), so a returning visit may find it expired: the
+  //      popup then says so, and clicking the row asks once;
+  //   2. otherwise server.py's /api/poi-image, if this page is served by it.
+  // Anything that fails just means no picture -- never an error.
+  const poiImageUrls = new Map();
+
+  async function poiImageSource(poi, askPermission) {
+    const storage = window.ULModBuddyStorage;
+    let root = null;
+    try {
+      root = storage && (await storage.getSavedRoot());
+    } catch (e) {
+      /* no storage -- fall through to the server */
+    }
+    if (root && root.queryPermission) {
+      let state = await root.queryPermission({ mode: "read" });
+      if (state !== "granted" && askPermission) state = await root.requestPermission({ mode: "read" });
+      if (state === "granted") {
+        const folders = [["Mods", "UndeadLegacy", "Prefabs", "POIs"], ["Data", "Prefabs", "POIs"]];
+        for (const parts of folders) {
+          try {
+            let dir = root;
+            for (const p of parts) dir = await dir.getDirectoryHandle(p);
+            const file = await (await dir.getFileHandle(poi + ".jpg")).getFile();
+            return { url: URL.createObjectURL(file) };
+          } catch (e) {
+            /* not in this folder -- try the next */
+          }
+        }
+        return { url: null };
+      }
+      return { needsPermission: true };
+    }
+    try {
+      const resp = await fetch(`/api/poi-image?name=${encodeURIComponent(poi)}`);
+      if (resp.ok) return { url: URL.createObjectURL(await resp.blob()) };
+    } catch (e) {
+      /* no server behind this page */
+    }
+    return { url: null };
+  }
+
+  function poiImageFor(poi, askPermission) {
+    const cached = poiImageUrls.get(poi);
+    if (cached && !(askPermission && cached.needsPermission)) return cached.promise;
+    const entry = { promise: poiImageSource(poi, askPermission) };
+    poiImageUrls.set(poi, entry);
+    entry.promise.then((r) => {
+      entry.needsPermission = !!r.needsPermission;
+      if (r.url === null) poiImageUrls.delete(poi);
+    });
+    return entry.promise;
+  }
+
+  let poiTipEl = null;
+  let poiTipFor = null;
+
+  function poiTip() {
+    if (!poiTipEl) {
+      poiTipEl = document.createElement("div");
+      poiTipEl.className = "poi-tooltip";
+      poiTipEl.hidden = true;
+      document.body.appendChild(poiTipEl);
+    }
+    return poiTipEl;
+  }
+
+  function movePoiTip(e) {
+    const tip = poiTip();
+    const pad = 16;
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    const x = e.clientX + pad + w > window.innerWidth ? e.clientX - pad - w : e.clientX + pad;
+    const y = Math.min(Math.max(8, e.clientY - h / 2), window.innerHeight - h - 8);
+    tip.style.left = Math.max(8, x) + "px";
+    tip.style.top = y + "px";
+  }
+
+  async function showPoiTip(poi, e, askPermission) {
+    const tip = poiTip();
+    poiTipFor = poi;
+    const result = await poiImageFor(poi, askPermission);
+    if (poiTipFor !== poi) return; // moved on while it loaded
+    if (result.url) tip.innerHTML = `<img src="${result.url}" alt="">`;
+    else if (result.needsPermission) tip.innerHTML = `<div class="poi-tooltip-note">Click this row to allow the browser to read POI pictures from your install folder.</div>`;
+    else return;
+    tip.hidden = false;
+    movePoiTip(e);
+  }
+
+  function hidePoiTip() {
+    poiTipFor = null;
+    if (poiTipEl) poiTipEl.hidden = true;
+  }
+
+  detailEl.addEventListener("mouseover", (e) => {
+    const row = e.target.closest("li[data-poi]");
+    if (!row || (e.relatedTarget && row.contains(e.relatedTarget))) return;
+    showPoiTip(row.dataset.poi, e, false);
+  });
+  detailEl.addEventListener("mousemove", (e) => {
+    if (poiTipEl && !poiTipEl.hidden && e.target.closest("li[data-poi]")) movePoiTip(e);
+  });
+  detailEl.addEventListener("mouseout", (e) => {
+    const row = e.target.closest("li[data-poi]");
+    if (row && !row.contains(e.relatedTarget)) hidePoiTip();
+  });
+  detailEl.addEventListener("click", (e) => {
+    const row = e.target.closest("li[data-poi]");
+    if (row) showPoiTip(row.dataset.poi, e, true);
+  });
+
+  function renderPoiCard(name) {
+    const perPoi = data.poiBlocks && data.poiBlocks[name];
+    if (!perPoi) return "";
+    // A POI with no recorded tier sorts after every real one.
+    const tierOf = (poi) => {
+      const t = data.pois && data.pois[poi] && data.pois[poi].tier;
+      return t == null ? Infinity : t;
+    };
+    const entries = Object.entries(perPoi).sort(
+      (a, b) =>
+        tierOf(a[0]) - tierOf(b[0]) || b[1] - a[1] || displayName(a[0]).localeCompare(displayName(b[0]))
+    );
+    const best = Math.max(...entries.map(([, n]) => n));
+    const body = POI_COUNT_SECTIONS.map(({ tier, label }) => {
+      const rows = entries.filter(([, n]) => lootTierFor(n, best) === tier);
+      if (!rows.length) return "";
+      const items = rows
+        .map(([poi, n]) => {
+          const info = (data.pois && data.pois[poi]) || {};
+          return (
+            `<li${info.img ? ` data-poi="${poi}"` : ""}><span class="ing-count">${n}&times;</span><span><strong>${displayName(poi)}</strong> (${poi})</span>` +
+            `${poiSkulls(info.tier)}</li>`
+          );
+        })
+        .join("");
+      return (
+        `<div class="section-label source-tier-label source-tier-label-${tier}">${label} (${rows.length})</div>` +
+        `<ul class="ingredient-list">${items}</ul>`
+      );
+    }).join("");
+    return (
+      `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Found in POIs (${entries.length})</div>` +
+      `<div class="variant-card">${body}</div>`
+    );
   }
 
   // A research page's whole point is sizing up what that research itself

@@ -92,9 +92,10 @@ Click **Rebuild data** in the header any time you update the mod.
   itself -- no game files, mod files, or extracted images are included or
   ever committed. You grant the app read access to your own, legally-owned
   install, and everything is built from those files on your own machine.
-- **It only reads XML and icons.** The build reads the game's and the
-  mod's XML config files, localization text, and icon images -- that's it.
-  No saves, no executables, nothing else in your install is touched.
+- **It only reads config, icons, and POI layouts.** The build reads the
+  game's and the mod's XML config files, localization text, icon images,
+  and each POI's prefab block data (to count what's inside it) -- plus a
+  POI's own thumbnail, only when you hover it -- that's it. No saves, no executables, nothing else in your install is touched.
 - **Nothing is ever uploaded anywhere.** Zero download and zero install
   both run entirely in your browser; Python runs entirely on `localhost`.
   None of the three ever talks to any server other than the one serving

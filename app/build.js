@@ -996,6 +996,111 @@ window.ULModBuddyBuilder = (function () {
   }
 
   // -------------------------------------------------------------------
+  // POI block counts -- which prefabs (points of interest) physically
+  // contain a given block, and how many of it. Read straight from each
+  // prefab's own binary files; see build.py's load_poi_blocks for the
+  // format notes (<name>.blocks.nim id->name table, <name>.tts voxels).
+  // Only blocks the app has a page for are counted (the caller passes every
+  // name it knows), and a prefab whose .nim never names any of them is
+  // skipped without ever opening its (much larger) .tts -- which is what
+  // keeps this tolerable in a browser, where ~500 MB of prefab data would
+  // otherwise be read.
+  // -------------------------------------------------------------------
+  function readNim(buf) {
+    const view = new DataView(buf);
+    const bytes = new Uint8Array(buf);
+    const decoder = new TextDecoder("utf-8");
+    const count = view.getUint32(4, true);
+    let pos = 8;
+    const names = new Map();
+    for (let i = 0; i < count; i++) {
+      const id = view.getUint32(pos, true);
+      pos += 4;
+      let length = 0, shift = 0, b;
+      do {
+        b = bytes[pos++];
+        length |= (b & 0x7f) << shift;
+        shift += 7;
+      } while (b >= 0x80);
+      names.set(id, decoder.decode(bytes.subarray(pos, pos + length)));
+      pos += length;
+    }
+    return names;
+  }
+
+  async function loadPoiBlocks(paths, relevantBlocks, placeholders, log) {
+    const prefabFiles = new Map();
+    const folders = [
+      [false, await tryGetDir(await tryGetDir(await tryGetDir(paths.rootHandle, "Data"), "Prefabs"), "POIs")],
+      [true, await tryGetDir(await tryGetDir(paths.modRoot, "Prefabs"), "POIs")],
+    ];
+    for (const [isMod, dir] of folders) {
+      if (!dir) continue;
+      for await (const [name, handle] of dir.entries()) {
+        if (handle.kind === "file" && /\.tts$/i.test(name)) {
+          prefabFiles.set(name.slice(0, -4), { isMod, dir, handle });
+        }
+      }
+    }
+
+    const pois = {};
+    const poiBlocks = {};
+    const prefabNames = [...prefabFiles.keys()].sort();
+    let done = 0;
+    for (const prefab of prefabNames) {
+      if (++done % 200 === 0) log(`  ...${done}/${prefabNames.length} prefabs`);
+      const { isMod, dir, handle } = prefabFiles.get(prefab);
+      const nimHandle = await tryGetFile(dir, prefab + ".blocks.nim");
+      if (!nimHandle) {
+        warn(`prefab ${prefab}: no .blocks.nim next to ${prefab}.tts -- skipped`);
+        continue;
+      }
+      let counts;
+      const idToBlock = new Map();
+      try {
+        for (const [id, raw] of readNim(await (await nimHandle.getFile()).arrayBuffer())) {
+          const resolved = resolveBlockPlaceholder(raw, placeholders);
+          if (relevantBlocks.has(resolved)) idToBlock.set(id, resolved);
+        }
+        if (!idToBlock.size) continue;
+        const buf = await (await handle.getFile()).arrayBuffer();
+        const view = new DataView(buf);
+        const version = view.getUint32(4, true);
+        const total = view.getUint16(8, true) * view.getUint16(10, true) * view.getUint16(12, true);
+        // Voxels start at byte 14, which isn't 4-byte aligned -- copy to an
+        // aligned buffer once so the hot loop can use a plain Uint32Array.
+        const voxels = new Uint32Array(buf.slice(14, 14 + 4 * total));
+        const mask = version <= 17 ? 0x7fff : 0xffff;
+        counts = new Map();
+        for (let i = 0; i < voxels.length; i++) {
+          const t = voxels[i] & mask;
+          if (idToBlock.has(t)) counts.set(t, (counts.get(t) || 0) + 1);
+        }
+      } catch (e) {
+        warn(`prefab ${prefab}: could not read block data (${e && e.message ? e.message : e}) -- skipped`);
+        continue;
+      }
+      if (!counts.size) continue;
+      for (const [id, n] of counts) {
+        const entry = (poiBlocks[idToBlock.get(id)] = poiBlocks[idToBlock.get(id)] || {});
+        entry[prefab] = (entry[prefab] || 0) + n;
+      }
+      let tier = null;
+      const xmlHandle = await tryGetFile(dir, prefab + ".xml");
+      if (xmlHandle) {
+        const m = /name="DifficultyTier"\s+value="(\d+)"/.exec(await (await xmlHandle.getFile()).text());
+        if (m) tier = parseInt(m[1], 10);
+      }
+      pois[prefab] = { tier, mod: isMod };
+      // Only whether the prefab's <name>.jpg thumbnail exists is recorded --
+      // the image is read on demand (see app.js's hover preview), never
+      // copied into the dataset.
+      if (await tryGetFile(dir, prefab + ".jpg")) pois[prefab].img = true;
+    }
+    return { pois, poiBlocks };
+  }
+
+  // -------------------------------------------------------------------
   // Shared source-row helpers (harvest + recycle)
   // -------------------------------------------------------------------
   // Never lets one bad numeric value produce a silent NaN downstream --
@@ -2308,6 +2413,10 @@ window.ULModBuddyBuilder = (function () {
       log(`  collapsed ${scrapLookalikes} look-alike scrap source row(s) (same display name/yield under a different internal item name)`);
     }
 
+    log("Counting blocks inside every POI prefab (reads each prefab's block data -- takes a bit)...");
+    const { pois, poiBlocks } = await loadPoiBlocks(paths, allNames, await loadBlockPlaceholders(paths), log);
+    log(`  ${Object.keys(poiBlocks).length} block(s) the app knows about found across ${Object.keys(pois).length} POI(s)`);
+
     const icons = {};
     const iconBlobs = {};
     const fallbackUsed = [];
@@ -2416,6 +2525,8 @@ window.ULModBuddyBuilder = (function () {
           vehicleColorVariants: Object.keys(vehicleColorVariants).length,
           lootSourceItems: Object.keys(lootSources).length,
           lootSourceRows: Object.values(lootSources).reduce((s, v) => s + v.length, 0),
+          pois: Object.keys(pois).length,
+          poiBlocks: Object.keys(poiBlocks).length,
         },
         unlockBreakdown: unlockCounts,
         warnings: WARNINGS,
@@ -2426,6 +2537,8 @@ window.ULModBuddyBuilder = (function () {
       acquisition,
       lootProbTemplates,
       lootSources,
+      pois,
+      poiBlocks,
       harvestSources,
       recycleYields,
       recycleSources,

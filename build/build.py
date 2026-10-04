@@ -1075,6 +1075,114 @@ def load_loot_sources():
     return loot_sources
 
 
+# ---------------------------------------------------------------------------
+# POI block counts -- which prefabs (points of interest) physically contain
+# a given block, and how many of it. Read straight from each prefab's own
+# binary files rather than any list the game ships:
+#   <name>.blocks.nim -- uint32 version, uint32 count, then count entries of
+#                        (uint32 id, 7-bit-length-prefixed UTF-8 block name)
+#   <name>.tts        -- "tts\0", uint32 version, 3x uint16 size (x, y, z),
+#                        then x*y*z little-endian uint32 voxels starting at
+#                        byte 14. The block id is the low bits of each voxel
+#                        -- 15 bits up to version 17, the full 16 from 18
+#                        on (checked against every shipped prefab: no id
+#                        ever falls outside its own .nim table either way).
+# Only blocks the app has a page for are counted (main() passes every name
+# it knows about -- thousands of purely structural shapes are skipped) --
+# and a prefab whose .nim never names any of them is skipped without ever
+# opening its (much larger) .tts.
+# ---------------------------------------------------------------------------
+def _read_nim(path):
+    data = path.read_bytes()
+    count = int.from_bytes(data[4:8], "little")
+    pos = 8
+    names = {}
+    for _ in range(count):
+        block_id = int.from_bytes(data[pos:pos + 4], "little")
+        pos += 4
+        length = shift = 0
+        while True:
+            b = data[pos]
+            pos += 1
+            length |= (b & 0x7F) << shift
+            shift += 7
+            if b < 0x80:
+                break
+        names[block_id] = data[pos:pos + length].decode("utf-8")
+        pos += length
+    return names
+
+
+def _prefab_tier(xml_path):
+    try:
+        m = re.search(r'name="DifficultyTier"\s+value="(\d+)"', read_text(xml_path))
+    except OSError:
+        return None
+    return int(m.group(1)) if m else None
+
+
+def load_poi_blocks(relevant_blocks, placeholders):
+    """Returns (pois, poi_blocks): pois is {prefab_name: {"tier": int|None,
+    "mod": bool}} for every prefab containing at least one relevant block;
+    poi_blocks is {block_name: {prefab_name: count}}. A mod prefab with the
+    same name as a vanilla one replaces it. Placeholder/randomizer stubs
+    placed in a prefab count toward their representative candidate, exactly
+    as everywhere else a source block name is recorded (see
+    load_block_placeholders)."""
+    from array import array
+    prefab_files = {}
+    for is_mod, folder in ((False, SRC / "Data" / "Prefabs" / "POIs"),
+                           (True, MOD_ROOT / "Prefabs" / "POIs")):
+        if not folder.is_dir():
+            continue
+        for tts in folder.glob("*.tts"):
+            prefab_files[tts.stem] = (is_mod, tts)
+
+    pois = {}
+    poi_blocks = {}
+    for prefab, (is_mod, tts) in sorted(prefab_files.items()):
+        nim = tts.with_suffix(".blocks.nim")
+        if not nim.exists():
+            warn(f"prefab {prefab}: no .blocks.nim next to {tts.name} -- skipped")
+            continue
+        try:
+            id_to_block = {}
+            for block_id, raw in _read_nim(nim).items():
+                resolved = resolve_block_placeholder(raw, placeholders)
+                if resolved in relevant_blocks:
+                    id_to_block[block_id] = resolved
+            if not id_to_block:
+                continue
+            data = tts.read_bytes()
+            version = int.from_bytes(data[4:8], "little")
+            sx, sy, sz = (int.from_bytes(data[8 + 2 * i:10 + 2 * i], "little") for i in range(3))
+            voxels = array("I")
+            voxels.frombytes(data[14:14 + 4 * sx * sy * sz])
+            mask = 0x7FFF if version <= 17 else 0xFFFF
+            wanted = set(id_to_block)
+            counts = {}
+            for v in voxels:
+                t = v & mask
+                if t in wanted:
+                    counts[t] = counts.get(t, 0) + 1
+        except (OSError, IndexError, ValueError) as e:
+            warn(f"prefab {prefab}: could not read block data ({e}) -- skipped")
+            continue
+        if not counts:
+            continue
+        for block_id, n in counts.items():
+            entry = poi_blocks.setdefault(id_to_block[block_id], {})
+            entry[prefab] = entry.get(prefab, 0) + n
+        pois[prefab] = {"tier": _prefab_tier(tts.with_suffix(".xml")), "mod": is_mod}
+        # Each prefab ships a <name>.jpg thumbnail beside its .tts. Only its
+        # existence is recorded -- the image itself is fetched on demand
+        # (see server.py's /api/poi-image and app.js's hover preview), never
+        # copied into the app.
+        if tts.with_suffix(".jpg").exists():
+            pois[prefab]["img"] = True
+    return pois, poi_blocks
+
+
 def _safe_float(value, default, context=None):
     """Never crashes the whole build over one bad numeric value -- warns and
     falls back instead. `context` is a short string identifying where the
@@ -2782,6 +2890,10 @@ def main(install_root):
         print(f"  collapsed {scrap_lookalikes} look-alike scrap source row(s) "
               f"(same display name/yield under a different internal item name)")
 
+    print("Counting blocks inside every POI prefab (reads each prefab's block data -- takes a bit)...")
+    pois, poi_blocks = load_poi_blocks(all_names, load_block_placeholders())
+    print(f"  {len(poi_blocks)} block(s) the app knows about found across {len(pois)} POI(s)")
+
     fallback_used = []
     base_game_used = []
     extends_used = []
@@ -2906,6 +3018,8 @@ def main(install_root):
                 "vehicleColorVariants": len(vehicle_color_variants),
                 "lootSourceItems": len(loot_sources),
                 "lootSourceRows": sum(len(v) for v in loot_sources.values()),
+                "pois": len(pois),
+                "poiBlocks": len(poi_blocks),
             },
             "unlockBreakdown": unlock_counts,
             "warnings": WARNINGS,
@@ -2915,6 +3029,8 @@ def main(install_root):
         "acquisition": acquisition,
         "lootProbTemplates": loot_prob_templates,  # {name: [(lo, hi, prob), ...]} -- tuples serialize as JSON arrays
         "lootSources": loot_sources,
+        "pois": pois,  # {prefab: {tier, mod}} -- only prefabs holding a known block
+        "poiBlocks": poi_blocks,  # {block: {prefab: count}}
         "harvestSources": harvest_sources,
         "recycleYields": recycle_yields,
         "recycleSources": recycle_sources,

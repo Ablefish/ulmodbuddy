@@ -28,8 +28,9 @@ browser; whichever you pick, the first-run experience is the same:
    research, icons, and everything else this guide covers -- in a few
    seconds, then takes over automatically.
 
-The build only reads XML config files, localization text, and icon
-images from your install -- nothing else. It's also only been tested
+The build only reads XML config files, localization text, icon images,
+and POI prefab block data from your install -- nothing else. (POI
+thumbnails are only read later, one at a time, when you hover a POI.) It's also only been tested
 against a clean Undead Legacy install with no other mods, so a heavily
 modded install may give odd or missing results.
 
@@ -150,6 +151,23 @@ odds can depend on a whole chain of nested loot-group gates, each one
 checked independently for the stage you picked, multiplied together for
 the combined number shown. Treat it as a rough guide to where to look, not
 verified drop odds.
+
+## Found in POIs
+
+A placed block -- a desktop PC, a monitor, a generator -- gets a **Found in
+POIs** section at the bottom of its page, below **Recycles Into**: every
+point of interest that contains one, grouped **High / Medium / Low Count**
+(relative to the POI holding the most). Each row reads `3x Name (prefab_id)`
+-- the prefab id is handy for searching in the in-game Prefab Editor -- with
+the POI's difficulty tier shown on the right as that many skulls (none for
+Tier 0 Remnants). Within each group the easiest POIs come first (lowest
+tier, then most copies, then name). **Hover a row** to see that POI's own
+thumbnail, read on demand from your install -- nothing is copied or stored.
+With the browser-only setups your browser may need to re-confirm read access
+to your install folder on a return visit; if so, the popup says to click
+the row once to allow it. It's counted straight from each POI's own prefab data, so
+it also covers UL's own POIs. Only blocks that physically sit in a POI get the section; a
+random-spawn placeholder block is counted as its most likely real variant.
 
 ## The Research Tree
 
