@@ -1,7 +1,6 @@
 # UL Mod Buddy
 
-Stop alt-tabbing to a wiki that's three updates behind. **UL Mod Buddy** is
-a searchable crafting, research, and loot reference for the
+**UL Mod Buddy** is a searchable crafting, research, and loot reference for the
 [Undead Legacy](http://ul.subquake.com) mod for *7 Days to Die*, built
 straight from your own install -- so it's always current with whatever
 version you're actually running.
