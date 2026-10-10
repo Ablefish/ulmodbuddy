@@ -233,9 +233,10 @@ its full world-repair cost broken down by damage tier:
 
 Below that, an **All Vehicles** table compares every vehicle's cargo
 capacity, top speed, weight, mod slots, durability, and repair kit tier
-side by side, grouped by vehicle class:
+side by side, grouped by the maintenance research that repairs it (Bicycle,
+Minibike, Motorcycle, Car, Van, Truck, and Gyrocopter Maintenance):
 
-![All Vehicles comparison table, grouped by class, sorted by cargo capacity](docs/screenshots/vehicle-comparison-table.png)
+![All Vehicles comparison table, grouped by maintenance research, sorted by cargo capacity](docs/screenshots/vehicle-comparison-table.png)
 
 Click the column headers to re-sort by a different stat.
 

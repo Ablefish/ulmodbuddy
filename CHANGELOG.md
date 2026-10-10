@@ -3,6 +3,24 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.2] - 2026-10-10
+
+### Added
+
+- **New build warning: broken `CanPickup` references** -- some blocks name
+  what the game should hand back when you pick them up (`param1`, the
+  mechanism behind "...VariantHelper" tokens), but a handful of those
+  targets don't actually exist anywhere in the mod's own data, so picking
+  those blocks back up in-game won't return the right item. The build now
+  checks every one of these against every known item and block name and
+  flags the ones that don't resolve.
+
+### Fixed
+
+- **GUIDE.md's Vehicles section still described the old grouping** -- the
+  All Vehicles table text and screenshot caption hadn't been updated for
+  1.4.1's switch to grouping by maintenance research.
+
 ## [1.4.1] - 2026-10-09
 
 ### Fixed
