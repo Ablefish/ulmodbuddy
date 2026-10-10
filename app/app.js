@@ -1706,20 +1706,64 @@ window.ULModBuddyApp = (function () {
   }
 
   function vehicleCompareTableHtml() {
-    const groups = new Map();
-    for (const [name, v] of Object.entries(data.vehicles || {})) {
-      const group = v.maintenanceGroup || "(none)";
-      if (!groups.has(group)) groups.set(group, []);
-      groups.get(group).push([name, v]);
+    // Sections are the maintenance schematic (research) needed to repair the
+    // vehicle -- ulmBookMaintenanceVan etc., off its repair tiers' learnable=
+    // -- NOT MaintenanceGroup: that one lumps cars and vans together
+    // (MG_CarRepair) and files the go-kart under Motorcycle even though it
+    // needs Minibike Maintenance. A vehicle with no repair path (buildable
+    // placeables, mine cart...) takes the most common schematic among
+    // vehicles sharing its MaintenanceGroup, else a MaintenanceGroup label.
+    const vehicles = Object.entries(data.vehicles || {});
+    // Crafted vehicles often have no repair tier at all, so their schematic
+    // comes from the research tree instead: walk up from the vehicle's own
+    // research node to the nearest ancestor that unlocks a "... Maintenance"
+    // book (e.g. 4x4 -> Cars -> Car Maintenance).
+    const research = data.research || {};
+    const researchSchematic = (name) => {
+      let cur = research[name] ? name : null;
+      for (let hops = 0; cur && research[cur] && hops < 50; hops++) {
+        const hit = (research[cur].unlocks || []).find((u) => u.name.startsWith("ulmBookMaintenance"));
+        if (hit) return hit.name;
+        cur = research[cur].parent;
+      }
+      return null;
+    };
+    const schematicOf = (v, name) => {
+      const t = (v.repairRecipes || []).find((r) => r.learnable);
+      return t ? t.learnable : researchSchematic(name);
+    };
+    const tally = new Map();
+    for (const [name, v] of vehicles) {
+      const s = schematicOf(v, name);
+      if (!s) continue;
+      const mg = v.maintenanceGroup || "(none)";
+      if (!tally.has(mg)) tally.set(mg, new Map());
+      tally.get(mg).set(s, (tally.get(mg).get(s) || 0) + 1);
     }
-    const groupLabel = (g) => g.replace(/^MG_/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2");
-    // In-game unlock progression, not alphabetical: bike, then minibike,
-    // then motorcycle, then cars/vans (one MaintenanceGroup covers both --
-    // the source data never actually splits them), then trucks, then a
-    // gyrocopter. Helicopters aren't part of that progression but still
-    // exist in the data, so they sort after everything named, in whatever
-    // order they naturally fall.
-    const GROUP_ORDER = ["MG_Bicycle", "MG_Minibike", "MG_Motorcycle", "MG_CarRepair", "MG_TruckRepair", "MG_Gyrocopter"];
+    const dominant = (mg) => {
+      const m = tally.get(mg);
+      return m ? [...m.entries()].sort((a, b) => b[1] - a[1])[0][0] : null;
+    };
+    const mgLabel = (g) => g.replace(/^MG_/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+    const groups = new Map();
+    const labels = new Map();
+    for (const [name, v] of vehicles) {
+      const s = schematicOf(v, name) || dominant(v.maintenanceGroup || "(none)");
+      const key = s || v.maintenanceGroup || "(none)";
+      if (!groups.has(key)) {
+        groups.set(key, []);
+        labels.set(key, s ? displayName(s) : mgLabel(key));
+      }
+      groups.get(key).push([name, v]);
+    }
+    const groupLabel = (g) => labels.get(g);
+    // In-game unlock progression, not alphabetical: bike, minibike,
+    // motorcycle, car, van, truck, then gyrocopter. Anything else
+    // (helicopters...) sorts after, alphabetically.
+    const GROUP_ORDER = [
+      "ulmBookMaintenanceBicycle", "ulmBookMaintenanceMinibike", "ulmBookMaintenanceMotorcycle",
+      "ulmBookMaintenanceCar", "ulmBookMaintenanceVan", "ulmBookMaintenanceTruck", "ulmBookMaintenanceGyrocopter",
+    ];
     const groupRank = (g) => {
       const i = GROUP_ORDER.indexOf(g);
       return i === -1 ? GROUP_ORDER.length : i;

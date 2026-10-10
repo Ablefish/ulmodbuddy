@@ -2101,6 +2101,35 @@ def load_vehicles():
                 elif ename == "DegradationMax":
                     d["degradationMax"] = eff.attrib.get("value")
 
+    # Many vehicles get their real ModSlots/DegradationMax/VehicleCargoCapacity
+    # from a later <append xpath="/items/item[starts-with(@name, 'X')]"> (or
+    # [@name='A' or @name='B']) block instead of their own <item>, e.g. the
+    # Military Truck's 10000 cargo. base_set there overrides whatever the
+    # item/its Extends parent declared, so apply after the pass above. Only
+    # appends that target specific names are handled; the bare
+    # xpath="/items" wrapper holds whole <item>s the loop above already saw.
+    for frag in scan_blocks(text, "append"):
+        el = parse_fragment(frag, VEHICLE_ITEMS_FILE.name)
+        if el is None:
+            continue
+        xpath = el.attrib.get("xpath", "")
+        prefixes = re.findall(r"starts-with\(@name,\s*'([^']+)'\)", xpath)
+        exact = set(re.findall(r"@name\s*=\s*'([^']+)'", xpath))
+        if not prefixes and not exact:
+            continue
+        stats = {}
+        for eff in el.iter("passive_effect"):
+            ename = eff.attrib.get("name")
+            field = {"VehicleCargoCapacity": "cargoCapacity", "ModSlots": "modSlots",
+                     "DegradationMax": "degradationMax"}.get(ename)
+            if field and eff.attrib.get("operation") == "base_set":
+                stats[field] = eff.attrib.get("value")
+        if not stats:
+            continue
+        for name, d in entries.items():
+            if name in exact or any(name.startswith(p) for p in prefixes):
+                d.update(stats)
+
     def resolve(name, field, seen=None):
         seen = seen or set()
         if name in seen or name not in entries:

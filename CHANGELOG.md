@@ -3,6 +3,26 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.1] - 2026-10-09
+
+### Fixed
+
+- **Vehicle stats were wrong for most vehicles** -- the build ignored the
+  mod's `<append>` patches in `items_vehicles.xml`, which is where many
+  vehicles get their real Cargo, Mod Slots and Durability. The Military
+  Truck showed 600 cargo / 12000 durability instead of 10000 / 30000, and
+  the Humvee, Minivan, Sedans, SUV, Coupe, Muscle Car, DH-1 helicopter,
+  Go-kart and bikes were affected too.
+
+### Changed
+
+- **All Vehicles table is grouped by maintenance research** -- sections are
+  now Bicycle, Minibike, Motorcycle, Car, Van, Truck and Gyrocopter
+  Maintenance (cars and vans used to share one "Car Repair" section, and the
+  Go-kart was filed under Motorcycle). A vehicle takes the schematic its
+  repair cost lists; crafted vehicles with no repair cost use the nearest
+  "... Maintenance" unlock above them in the research tree.
+
 ## [1.4.0] - 2026-10-03
 
 ### Added

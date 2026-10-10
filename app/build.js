@@ -1778,6 +1778,29 @@ window.ULModBuddyBuilder = (function () {
       }
     }
 
+    // Many vehicles get their real ModSlots/DegradationMax/VehicleCargoCapacity
+    // from a later <append xpath="/items/item[starts-with(@name, 'X')]"> (or
+    // [@name='A' or @name='B']) block instead of their own <item>, e.g. the
+    // Military Truck's 10000 cargo. base_set there overrides whatever the
+    // item/its Extends parent declared, so apply after the pass above. The
+    // bare xpath="/items" wrapper has no name filter and is skipped.
+    const APPEND_FIELDS = { VehicleCargoCapacity: "cargoCapacity", ModSlots: "modSlots", DegradationMax: "degradationMax" };
+    for (const el of scanBlocks(doc, "append")) {
+      const xpath = attr(el, "xpath", "");
+      const prefixes = Array.from(xpath.matchAll(/starts-with\(@name,\s*'([^']+)'\)/g), (m) => m[1]);
+      const exact = new Set(Array.from(xpath.matchAll(/@name\s*=\s*'([^']+)'/g), (m) => m[1]));
+      if (!prefixes.length && !exact.size) continue;
+      const stats = {};
+      for (const eff of Array.from(el.getElementsByTagName("passive_effect"))) {
+        const field = APPEND_FIELDS[attr(eff, "name")];
+        if (field && attr(eff, "operation") === "base_set") stats[field] = attr(eff, "value");
+      }
+      if (!Object.keys(stats).length) continue;
+      for (const name in entries) {
+        if (exact.has(name) || prefixes.some((p) => name.startsWith(p))) Object.assign(entries[name], stats);
+      }
+    }
+
     function resolve(name, field, seen) {
       seen = seen || new Set();
       if (!name || seen.has(name) || !(name in entries)) return null;
