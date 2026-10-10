@@ -2041,8 +2041,41 @@ window.ULModBuddyBuilder = (function () {
     return null;
   }
 
+  // CanPickup's param1 names the thing the game should actually hand back
+  // on pickup, bypassing the placed block's own identity -- the mechanism
+  // the "<X>VariantHelper" blocks exist for, so one crafted item can be
+  // placed as any of several rotated/offset shapes and still hand back the
+  // SAME item when picked back up. The target isn't always a VariantHelper
+  // block specifically -- plenty of entries (e.g. "candle",
+  // "meleeToolTorch") point straight at an ordinary item instead -- so
+  // it's checked against every known item AND block name, not just blocks.
+  // A target that resolves to neither is a dead reference in the mod's own
+  // source data, not something this app invents or silently works around:
+  // verified against a real install, 2.7.40 introduced a mid-string typo
+  // in ulmElectricWireRelay's own param1 ("...VarulmElectricWireRelay-
+  // iantHelper"), and several others (ulmLightChandelierFanPlayer,
+  // ulmSchoolSeat01/02VariantHelper, ulmLightBarLongPlayerVariantHelper,
+  // ulmDecoPottedAloePlant) were already broken before that -- each one
+  // means picking that block back up in-game won't return the intended
+  // item.
   async function loadVariantHelperCandidates(paths) {
     const helperToCandidates = {};
+
+    const knownNames = new Set();
+    const nameFiles = [paths.baseItemFile, paths.baseBlockFile, paths.baseItemModifiersFile, paths.modItemModifiersFile]
+      .concat(paths.itemFiles, paths.blockFiles);
+    for (const fileRef of nameFiles) {
+      if (!fileRef.handle) continue;
+      const doc = await readAndParse(fileRef);
+      if (!doc) continue;
+      for (const tag of ITEM_BLOCK_TAGS) {
+        for (const el of scanBlocks(doc, tag)) {
+          const name = attr(el, "name") || nameFromXpath(attr(el, "xpath"));
+          if (name) knownNames.add(name);
+        }
+      }
+    }
+
     for (const fileRef of paths.blockFiles) {
       if (!fileRef.handle) continue;
       const doc = await readAndParse(fileRef);
@@ -2051,11 +2084,20 @@ window.ULModBuddyBuilder = (function () {
         for (const el of scanBlocks(doc, tag)) {
           const name = attr(el, "name") || nameFromXpath(attr(el, "xpath"));
           if (!name) continue;
+          // A block can carry more than one CanPickup property (seen in
+          // the wild: schoolSeat01White has two, apparently a copy-paste
+          // leftover) -- every one is a real pickup-resolution rule the
+          // game will use, so every one is validated, even though only
+          // the first still wins as the icon-fallback candidate below
+          // (unchanged from before this check existed).
           let helper = null;
           for (const prop of Array.from(el.getElementsByTagName("property"))) {
-            if (attr(prop, "name") === "CanPickup" && attr(prop, "value") === "true" && attr(prop, "param1")) {
-              helper = attr(prop, "param1");
-              break;
+            if (attr(prop, "name") !== "CanPickup" || attr(prop, "value") !== "true") continue;
+            const target = attr(prop, "param1");
+            if (!target) continue;
+            if (helper === null) helper = target;
+            if (!knownNames.has(target)) {
+              warn(`block '${name}': CanPickup param1 '${target}' does not match any known item or block -- picking this up in-game will not return the intended item`);
             }
           }
           if (!helper) continue;

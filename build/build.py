@@ -2450,6 +2450,33 @@ def resolve_interact_name(name, interact_names, extends_map):
 
 
 def load_variant_helper_candidates():
+    """CanPickup's param1 names the thing the game should actually hand
+    back on pickup, bypassing the placed block's own identity -- the
+    mechanism the "<X>VariantHelper" blocks exist for, so one crafted item
+    can be placed as any of several rotated/offset shapes and still hand
+    back the SAME item when picked back up. The target isn't always a
+    VariantHelper block specifically -- plenty of entries (e.g. "candle",
+    "meleeToolTorch") point straight at an ordinary item instead -- so it's
+    checked against every known item AND block name, not just blocks. A
+    target that resolves to neither is a dead reference in the mod's own
+    source data, not something this app invents or silently works around:
+    verified against a real install, 2.7.40 introduced a mid-string typo in
+    ulmElectricWireRelay's own param1 ("...VarulmElectricWireRelay-
+    iantHelper"), and several others (ulmLightChandelierFanPlayer,
+    ulmSchoolSeat01/02VariantHelper, ulmLightBarLongPlayerVariantHelper,
+    ulmDecoPottedAloePlant) were already broken before that -- each one
+    means picking that block back up in-game won't return the intended
+    item."""
+    known_names = set()
+    for path in [BASE_ITEM_FILE, BASE_BLOCK_FILE, BASE_ITEM_MODIFIERS_FILE, MOD_ITEM_MODIFIERS_FILE] + ITEM_FILES + BLOCK_FILES:
+        if not path.exists():
+            continue
+        text = read_text(path)
+        for tag, name_a, name_b, body in ITEM_BLOCK_RE.findall(text):
+            name = name_a or name_b
+            if name:
+                known_names.add(name)
+
     helper_to_candidates = {}
     for path in BLOCK_FILES:
         if not path.exists():
@@ -2459,10 +2486,21 @@ def load_variant_helper_candidates():
             name = name_a or name_b
             if not name:
                 continue
-            cp = re.search(r'CanPickup" value="true" param1="([^"]+)"', body)
-            if not cp:
+            # A block can carry more than one CanPickup property (seen in
+            # the wild: schoolSeat01White has two, apparently a copy-paste
+            # leftover) -- every one is a real pickup-resolution rule the
+            # game will use, so every one is validated, even though only
+            # the first still wins as the icon-fallback candidate below
+            # (unchanged from before this check existed).
+            helper = None
+            for cp in re.finditer(r'CanPickup" value="true" param1="([^"]+)"', body):
+                target = cp.group(1)
+                if helper is None:
+                    helper = target
+                if target not in known_names:
+                    warn(f"block '{name}': CanPickup param1 '{target}' does not match any known item or block -- picking this up in-game will not return the intended item")
+            if not helper:
                 continue
-            helper = cp.group(1)
             ci = re.search(r'CustomIcon" value="([^"]+)"', body)
             candidate = ci.group(1) if ci else name
             helper_to_candidates.setdefault(helper, []).append(candidate)
