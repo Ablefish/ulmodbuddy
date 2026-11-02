@@ -3,6 +3,42 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.5.0] - 2026-11-01
+
+### Added
+
+- **Tweaks: a mod generator for the book and research grind** -- the new
+  **Tweaks** button builds a separate, standalone mod (a zip) that overrides
+  Undead Legacy's recipes to reduce, or increase, how many Old Books and
+  research-data items it asks for. Independent Books and Data sliders
+  (0%-200%) for research nodes, workstation upgrades and maintenance
+  upgrades; 100% leaves a cost alone, 0% removes it, anything else rounds
+  up. Extract the zip into your `Mods` folder (you should get
+  `Mods\zz_ULModBuddyTweaks\ModInfo.xml`); delete the folder to undo. Your
+  install and the Undead Legacy files are never edited. Regenerate it after
+  updating Undead Legacy.
+- **Other-mod detection** -- after a rebuild, the app lists any extra mods
+  that change recipes (including the Tweaks mod) in an **Additional mods
+  found** banner, and pages whose costs a mod changed show a red "Costs
+  include changes from mods" notice.
+- **Maintenance upgrades on item pages** -- weapons, tools and armor show
+  each grade step (H through SSS) at the bottom of the page, with the
+  in-game letter badges and per-grade tints, the research that unlocks it
+  and its cost.
+- **Single-tier stations are workstations** -- stations with no upgrade chain
+  (such as the Campfire, which needs no research and counts as Tier 0)
+  now get workstation pages and tier info like the upgradeable ones.
+
+### Changed
+
+- **"Recipes" filter is now "Craftables"** -- clearer next to Items.
+- **Stove and Cement Mixer are items, Powered Stove and Powered Cement
+  Mixer are the craftables** -- the plain ones are the blocks found in POIs;
+  the powered ones are what you actually craft.
+- **Less noise in search** -- admin-only items and bare stub entries that
+  duplicated a workstation (such as the plain Workbench) no longer appear.
+- **Docs** -- README and GUIDE describe Tweaks and maintenance upgrades.
+
 ## [1.4.2] - 2026-10-10
 
 ### Added

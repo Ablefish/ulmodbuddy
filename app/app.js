@@ -72,14 +72,36 @@ window.ULModBuddyApp = (function () {
   // line with it.
   metaEl.title = "The mod version above is read from the mod's own ModInfo.xml, which its author doesn't always update on every release -- it may not match what the game itself displays.";
 
+  // Other mods in Mods/ whose recipe patches were folded into this data.
+  const bannerEl = $("#mods-banner");
+  const otherMods = data.otherMods || [];
+  if (bannerEl && otherMods.length) {
+    const esc = (t) => String(t).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+    const parts = otherMods.map((m) => {
+      let t = `<strong>${esc(m.name)}</strong>${m.version ? ` v${esc(m.version)}` : ""}`;
+      if (m.patches) t += ` &mdash; ${m.applied} of ${m.patches} recipe patches applied`;
+      else t += ` &mdash; no recipe changes`;
+      if (m.unsupported) t += ` <span class="mods-banner-warn">(${m.unsupported} not reflected here)</span>`;
+      return t;
+    });
+    bannerEl.innerHTML =
+      `<span class="mods-banner-title">Additional mods found:</span> ${parts.join("; ")}. ` +
+      `<span class="mods-banner-note">Costs below include their changes; Undead Legacy&rsquo;s own values are unchanged on disk.</span>`;
+    bannerEl.hidden = false;
+  }
+
   rebuildBtnEl.hidden = false;
   rebuildBtnEl.addEventListener("click", () => window.ULModBuddySetup.open({ allowCancel: true }));
   treeBtnEl.hidden = false;
+  window.ULModBuddyTweaks.init(data);
 
   const displayName = (internalName) => {
     if (!internalName) return internalName;
-    return data.names[internalName] || internalName;
+    return DISPLAY_NAME_OVERRIDES[internalName] || data.names[internalName] || internalName;
   };
+  // The game's own text calls both the craftable and the POI-found block
+  // "Cement Mixer"; the craftable one is the Powered Cement Mixer.
+  const DISPLAY_NAME_OVERRIDES = { ulmStationCementMixerPowered: "Powered Cement Mixer" };
 
   const iconFor = (internalName) => data.icons[internalName] || null;
   const iconFallbackNames = new Set(data.iconFallbackNames || []);
@@ -149,11 +171,47 @@ window.ULModBuddyApp = (function () {
       stationFamilyNames.add(t);
     });
   });
-  // Single-tier stations (campfire, stove, cementMixer) never appear in
-  // data.upgrades at all -- no tierInfo entry, same as any other block name
-  // that happens not to be part of a real upgrade chain (see
-  // workstationRowKeyFor, which treats both cases identically: no tier to
-  // place them by).
+  // Single-tier stations (campfire, cementMixer, kiln, ...) never appear in
+  // data.upgrades, so they can't be found by walking a chain. They are still
+  // workstations: anything a recipe names as its crafting area, or the
+  // always-available list, that isn't already part of a family. Each gets a
+  // one-tier "family" of its own, flagged `single` so the recipe grid
+  // (workstationRowKeyFor) still treats it as having no tier axis.
+  //
+  // Its tier: 0 when its own recipe is unlocked from the start (campfire);
+  // otherwise the tier of the Research Bench needed to unlock it -- the
+  // block you place often isn't what the research names, so a few likely
+  // aliases are tried. "stove" and "cementMixer" get no station page: they
+  // are the plain blocks found in POIs (the Stove is an ingredient of the
+  // Powered Stove; the Cement Mixer can be searched and broken down), while
+  // the only ones you can craft and place are the Powered Stove and Powered
+  // Cement Mixer, which are ordinary recipes with their own pages.
+  const NO_STATION_PAGE = new Set(["stove", "cementMixer"]);
+  const singleStationNames = new Set([
+    ...(data.alwaysAvailableStations || []),
+    ...Object.values(data.recipes).map((r) => r.area).filter(Boolean),
+  ]);
+  function researchBenchTierFor(name) {
+    const cap = name.charAt(0).toUpperCase() + name.slice(1);
+    for (const key of [name, `ulmStation${cap}Powered`, `ulmStation${cap}_1`]) {
+      const node = reportEngine.findResearchFor(key);
+      const m = node && /_(\d+)/.exec(node.area || "");
+      if (m) return parseInt(m[1], 10);
+    }
+    return null;
+  }
+  for (const name of singleStationNames) {
+    if (tierInfo[name] || NO_STATION_PAGE.has(name)) continue;
+    const noResearch = (data.recipesByName[name] || []).some((id) => data.recipes[id].always_unlocked);
+    tierInfo[name] = {
+      familyTiers: [name],
+      tierIndex: 0,
+      single: true,
+      tier0: noResearch,
+      singleTier: noResearch ? 0 : researchBenchTierFor(name),
+    };
+    stationFamilyNames.add(name);
+  }
 
   // Tier 1's raw localized name is plain ("Carpenter's Table"); later tiers
   // already read "Carpenter's Table (Tier 2)" in the mod's own Localization
@@ -161,7 +219,7 @@ window.ULModBuddyApp = (function () {
   function workstationDisplayName(name) {
     const base = displayName(name);
     const info = tierInfo[name];
-    return info && info.tierIndex === 0 && !/\(Tier \d+\)/.test(base) ? `${base} (Tier 1)` : base;
+    return info && !info.single && info.tierIndex === 0 && !/\(Tier \d+\)/.test(base) ? `${base} (Tier 1)` : base;
   }
 
   // Anything with real acquisition/harvest/recycle data but no recipe,
@@ -197,13 +255,41 @@ window.ULModBuddyApp = (function () {
   // browsable index entirely; __cookbookJump below redirects any direct
   // reference straight to the representative instead.
   const vehicleColorVariantOf = data.vehicleColorVariants || {};
+  // The base game's developer/cheat items (e.g. modArmorAdminToughGuyShirt)
+  // are never obtainable in normal play, so they get no page of their own.
+  const ADMIN_ONLY_NAME = /admin/i;
+
+  // A base-game name the mod rewired into something else (e.g. vanilla
+  // "workbench", now just the plain block behind the real Workbench tiers):
+  // its only data is a leftover scrap yield, no acquisition/harvest/recycle/
+  // POI of its own, and a real workstation page already carries
+  // the same display name. Listing it too just gives search a second, near-
+  // empty "Workbench". A broken/collapsed one found in POIs is a different
+  // name with its own POI data, so it isn't affected.
+  // Station pages only: matching a plain recipe/research name would wrongly
+  // hide loot items (the maintenance books share names with research nodes).
+  const displayNamesWithPage = new Set([...stationFamilyNames].map((n) => displayName(n)));
+  const scrapOutputs = new Set(Object.values(data.scrapYields || {}).map((s) => s.name));
+  const isShadowedStub = (name) =>
+    !!(data.scrapYields && data.scrapYields[name]) &&
+    !data.acquisition[name] &&
+    !(data.harvestSources || {})[name] &&
+    !(data.recycleYields || {})[name] &&
+    !(data.recycleSources || {})[name] &&
+    !(data.poiBlocks || {})[name] &&
+    !(data.vehicles || {})[name] &&
+    !(data.itemMods || []).includes(name) &&
+    !scrapOutputs.has(name) &&
+    displayNamesWithPage.has(displayName(name));
   const itemOnlyNames = new Set(
     [...orphanCandidates].filter(
       (name) =>
         !stationFamilyNames.has(name) &&
         !data.recipesByName[name] &&
         !data.research[name] &&
-        !vehicleColorVariantOf[name]
+        !vehicleColorVariantOf[name] &&
+        !ADMIN_ONLY_NAME.test(name) &&
+        !isShadowedStub(name)
     )
   );
 
@@ -245,7 +331,7 @@ window.ULModBuddyApp = (function () {
 
   const FILTERS = [
     { key: "all", label: "All" },
-    { key: "recipe", label: "Recipes" },
+    { key: "recipe", label: "Craftables" },
     { key: "research", label: "Research" },
     { key: "workstation", label: "Workstations" },
     { key: "item", label: "Items" },
@@ -802,12 +888,15 @@ window.ULModBuddyApp = (function () {
   // completely different internal name. Confirmed against what the main
   // search nav itself resolves "Powered Stove" to (data.names /
   // data.icons), not guessed.
-  const AREA_DISPLAY_OVERRIDES = { stove: "ulmStationStovePoweredVariantHelper" };
+  const AREA_DISPLAY_OVERRIDES = {
+    stove: "ulmStationStovePoweredVariantHelper",
+    cementMixer: "ulmStationCementMixerPowered",
+  };
   const workstationDisplayKeyFor = (key) => AREA_DISPLAY_OVERRIDES[key] || key;
 
   function workstationRowKeyFor(area) {
     if (area === null) return { key: "__backpack__", label: "Backpack", tiered: false };
-    if (tierInfo[area]) {
+    if (tierInfo[area] && !tierInfo[area].single) {
       const root = tierInfo[area].familyTiers[0];
       return { key: root, label: displayName(root), tiered: true };
     }
@@ -1857,6 +1946,87 @@ window.ULModBuddyApp = (function () {
     return html;
   }
 
+  // In-game quality grades, lowest first. A maintenance <upgrade> band's
+  // quality range (1-10, 11-20, ...) is the item's CURRENT grade; the upgrade
+  // takes it to the next one. Only the letters are shown -- the numeric
+  // bands never appear in the game.
+  const QUALITY_GRADES = ["H", "G", "F", "E", "D", "C", "B", "A", "S", "SSS"];
+
+  // Cost to upgrade a piece of gear grade by grade at the Maintenance
+  // Station. A one-off <modify name> block for the item wins over its
+  // MaintenanceGroup's; when a group is defined twice, the first copy is
+  // shown (see loadMaintenance for why).
+  // The badge sprites are near-white; the game tints them per grade. Multiply
+  // the tint over the sprite on a canvas (keeping its shading and outline),
+  // then clip back to the sprite's own shape.
+  function tintGradeBadges(root) {
+    for (const img of root.querySelectorAll("img.grade-badge[data-tint]")) {
+      const tint = "#" + img.dataset.tint;
+      const apply = () => {
+        try {
+          const c = document.createElement("canvas");
+          c.width = img.naturalWidth;
+          c.height = img.naturalHeight;
+          const ctx = c.getContext("2d");
+          ctx.drawImage(img, 0, 0);
+          ctx.globalCompositeOperation = "multiply";
+          ctx.fillStyle = tint;
+          ctx.fillRect(0, 0, c.width, c.height);
+          ctx.globalCompositeOperation = "destination-in";
+          ctx.drawImage(img, 0, 0);
+          img.removeAttribute("data-tint");
+          img.src = c.toDataURL();
+        } catch (e) {
+          /* tinting is cosmetic -- leave the untinted sprite */
+        }
+      };
+      if (img.complete && img.naturalWidth) apply();
+      else img.addEventListener("load", apply, { once: true });
+    }
+  }
+
+  function renderMaintenanceSection(name) {
+    if (!data.maintenance) return "";
+    const group = data.maintenanceByItem && data.maintenanceByItem[name];
+    const block =
+      data.maintenance.find((b) => b.name === name && b.copy === 1) ||
+      (group && data.maintenance.find((b) => b.group === group && b.copy === 1));
+    if (!block || !block.upgrades.length) return "";
+    let html = `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Maintenance Upgrades</div>`;
+    html += block.upgrades
+      .map((up) => {
+        const from = Math.floor((parseInt(String(up.quality).split(",")[0], 10) - 1) / 10);
+        const fromGrade = QUALITY_GRADES[from];
+        const toGrade = QUALITY_GRADES[from + 1];
+        if (!fromGrade || !toGrade) return "";
+        const station = /^maintenance_(\d+)$/.exec(up.area || "");
+        let card = `<div class="variant-card">`;
+        const gradeBadge = (i) => {
+          const key = i === 9 ? "max" : String(i + 1);
+          const src = iconFor(`symbol_quality_${key}`);
+          const g = QUALITY_GRADES[i];
+          // SSS has no tint of its own in qualityinfo.xml -- reuses S's gold.
+          const tint = data.qualityColors && data.qualityColors[String(Math.min(i + 1, 9))];
+          return src
+            ? `<img class="grade-badge" src="${src}" alt="${g}" title="${g}"${tint ? ` data-tint="${tint}"` : ""}>`
+            : g;
+        };
+        card += `<div class="kv-row"><span class="k">Grade</span><span class="grade-change">${gradeBadge(from)} &rarr; ${gradeBadge(from + 1)}</span></div>`;
+        if (station) card += `<div class="kv-row"><span class="k">Station</span><span>Maintenance Station tier ${station[1]}</span></div>`;
+        card += `<ul class="ingredient-list">`;
+        card += up.ingredients
+          .map(
+            (ing) =>
+              `<li>${reportRowIcon(ing.name)}<span class="ing-count">${qtyLabel(Number(ing.count))}&times;</span>${jumpSpan(ing.name, displayName(ing.name))}</li>`
+          )
+          .join("");
+        card += `</ul></div>`;
+        return card;
+      })
+      .join("");
+    return html;
+  }
+
   window.__cookbookSortVehicles = function (col) {
     if (vehicleSort.column === col) {
       vehicleSort.direction *= -1;
@@ -1921,7 +2091,15 @@ window.ULModBuddyApp = (function () {
     } else if (kind === "workstation") {
       const info = tierInfo[name];
       html += `<div class="variant-card">`;
-      html += `<div class="kv-row"><span class="k">Tier</span><span>${info.tierIndex + 1} of ${info.familyTiers.length}</span></div>`;
+      if (!info.single) {
+        html += `<div class="kv-row"><span class="k">Tier</span><span>${info.tierIndex + 1} of ${info.familyTiers.length}</span></div>`;
+      } else if (info.tier0) {
+        html += `<div class="kv-row"><span class="k">Tier</span><span>0 (no research needed)</span></div>`;
+      } else if (info.singleTier) {
+        html += `<div class="kv-row"><span class="k">Tier</span><span>${info.singleTier} (unlocked at a Research Bench tier ${info.singleTier}; no upgrades)</span></div>`;
+      } else {
+        html += `<div class="kv-row"><span class="k">Tier</span><span>Single tier (no upgrades)</span></div>`;
+      }
       if (info.tierIndex < info.familyTiers.length - 1) {
         html += `<div class="kv-row"><span class="k">Upgrades to</span><span class="text-workstation">${workstationDisplayName(info.familyTiers[info.tierIndex + 1])}</span></div>`;
       }
@@ -2639,7 +2817,10 @@ window.ULModBuddyApp = (function () {
     // for a bare research node. Material Totals dropped: One-Time Totals (in
     // the left nav) already covers the same ground when nothing's expanded,
     // and the two would just duplicate each other once something is.
-    if ((kind === "recipe" || kind === "workstation") && report.constructionTree) {
+    // A station with no recipe at all (stove, cement mixer: always on hand)
+    // has nothing to cost out.
+    if ((kind === "recipe" || kind === "workstation") && report.constructionTree &&
+        (kind === "recipe" || report.constructionTree.children.length || report.constructionTree.toolRef)) {
       html += `<div class="section-label" style="font-size:15px;color:var(--accent);margin-top:20px;">Crafting Cost</div>`;
       const costIntro =
         kind === "recipe"
@@ -2656,7 +2837,11 @@ window.ULModBuddyApp = (function () {
           rootInner += `<li class="req-leaf req-dim">Tool: <span>${displayName(report.constructionTree.toolRef)}</span> <span class="req-flag-dim">(see Tools below)</span></li>`;
         }
       }
-      html += `<div class="variant-card"><div class="req-flag-dim" style="margin:0 0 10px;">${costIntro}</div><ul class="req-tree req-tree-root"><li>${rootRow}<ul class="req-tree">${rootInner}</ul></li></ul></div>`;
+      const appliedMods = (data.otherMods || []).filter((m) => m.applied);
+      const modNotice = appliedMods.length
+        ? `<div class="mods-card-warning">Costs include changes from mods: ${appliedMods.map((m) => `<strong>${m.name.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]))}</strong>`).join(", ")}</div>`
+        : "";
+      html += `<div class="variant-card">${modNotice}<div class="req-flag-dim" style="margin:0 0 10px;">${costIntro}</div><ul class="req-tree req-tree-root"><li>${rootRow}<ul class="req-tree">${rootInner}</ul></li></ul></div>`;
     }
 
     // Section 2 -- one-time research/workstation/tool investment: each part
@@ -2695,7 +2880,11 @@ window.ULModBuddyApp = (function () {
       html += renderPoiCard(name);
     }
 
+    // Last on the page: a reference extra, not part of acquiring/crafting.
+    html += renderMaintenanceSection(name);
+
     detailEl.innerHTML = html;
+    tintGradeBadges(detailEl);
     renderTotalsPanel(report);
   }
 

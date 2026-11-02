@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>UL Mod Buddy</title>
-<link rel="stylesheet" href="styles.css?dev=35">
+<link rel="stylesheet" href="styles.css?dev=38">
 </head>
 <body>
 <header>
@@ -12,13 +12,16 @@
        immediately on any page load regardless of cache state, so "which
        code am I actually running" is always answerable without opening
        devtools. Bump this by hand alongside each CHANGELOG.md/tag. -->
-  <span id="app-version" class="app-version" title="UL Mod Buddy build version (not the mod's own version, shown below)">v1.4.2</span>
+  <span id="app-version" class="app-version" title="UL Mod Buddy build version (not the mod's own version, shown below)">v1.5.0</span>
   <div id="meta-line" class="meta-line"></div>
   <button id="tree-btn" class="rebuild-btn" type="button" hidden
           title="Browse the research tree by category">Research Tree</button>
+  <button id="tweaks-btn" class="rebuild-btn" type="button" hidden
+          title="Generate a mod that scales book and research-data costs">Tweaks</button>
   <button id="rebuild-btn" class="rebuild-btn" type="button" hidden
           title="Re-run the data build (e.g. after a mod update)">Rebuild data</button>
 </header>
+<div id="mods-banner" class="mods-banner" hidden></div>
 
 <main>
   <section class="panel list-panel">
@@ -103,6 +106,18 @@
   </div>
 </div>
 
+<!-- Tweaks: sliders that scale book / research-data costs, then download a
+     separate mod (zip) of XML patches. Logic lives in tweaks.js. -->
+<div id="tweaks-modal" class="modal-overlay" hidden>
+  <div class="modal-card modal-card-tweaks">
+    <div class="modal-header">
+      <span>Tweaks</span>
+      <button id="tweaks-modal-close" class="modal-close" type="button" title="Close" aria-label="Close">&times;</button>
+    </div>
+    <div id="tweaks-body" class="modal-body"></div>
+  </div>
+</div>
+
 <div id="build-modal" class="modal-overlay" hidden>
   <div class="modal-card">
     <div class="modal-header">
@@ -147,9 +162,10 @@
      whenever a stale browser cache serves an old copy of one of these
      mid-session. Harmless to ship, but fine to drop before a real release. -->
 <script src="reportEngine.js?dev=5"></script>
-<script src="build.js?dev=11"></script>
+<script src="build.js?dev=13"></script>
 <script src="storage.js?dev=2"></script>
-<script src="app.js?dev=78"></script>
+<script src="tweaks.js?dev=3"></script>
+<script src="app.js?dev=89"></script>
 <script src="setup.js?dev=6"></script>
 </body>
 </html>

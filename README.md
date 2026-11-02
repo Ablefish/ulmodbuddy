@@ -21,6 +21,12 @@ screenshots.
 - **Research Tree** -- a visual map of each research category, or a
   compact Recipe grid of everything one workstation can make.
 - **Vehicles** -- stats, repair costs, and a sortable comparison table.
+- **Tweaks: tune the book and research grind** -- generates a separate,
+  standalone mod that overrides Undead Legacy's recipes to lower (or raise)
+  how many Old Books and research-data items research, workstation upgrades
+  and maintenance upgrades cost. Set the sliders, download the zip, extract
+  it into `Mods`. Your install and the Undead Legacy files are never edited;
+  delete the mod's folder to undo it.
 - **Build warnings** -- gaps or typos in the mod's own data, surfaced
   in-app instead of buried in a log.
 
@@ -113,6 +119,13 @@ Click **Rebuild data** in the header any time you update the mod.
 - **Tested on a clean install only.** It's only been tried against a
   clean Undead Legacy install -- no other mods. Other mods that change the
   same XML files may give odd or missing results.
+- **The Tweaks mod is the one thing this tool produces.** Everything else
+  is read-only. Tweaks generates a standalone mod that overrides Undead
+  Legacy's research and upgrade recipes (to reduce or increase the
+  book/research grind); you choose to download it and extract it into your
+  own `Mods` folder -- see
+  [Tweaks](GUIDE.md#tweaks-scale-book-and-research-costs) in the guide.
+  Regenerate it after updating Undead Legacy.
 - Desktop only -- not tested on phones or tablets, and the browser-based
   setups rely on an API mobile browsers largely don't support yet.
 - Every warning about the mod's own data (unresolved references, likely

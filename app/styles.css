@@ -819,6 +819,68 @@ img.icon-ring-workstation {
   max-height: 90vh;
 }
 
+/* Tweaks modal: one row per category, a Books and a Data slider in each. */
+.modal-card-tweaks {
+  width: min(640px, 95vw);
+}
+.tweak-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.tweak-row-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.tweak-row-hint {
+  display: block;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.tweak-slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0;
+}
+.tweak-slider-label {
+  width: 52px;
+  color: var(--text-dim);
+}
+.tweak-slider input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.tweak-slider-value {
+  width: 44px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tweak-summary {
+  margin: 12px 0;
+  padding: 8px 10px;
+  background: var(--panel-alt);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.tweak-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.tweak-actions .rebuild-btn {
+  margin-left: 0;
+}
+.tweak-download:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.tweak-download:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .tree-controls {
   display: flex;
   align-items: center;
@@ -1497,4 +1559,27 @@ li[data-poi] {
   padding: 6px 8px;
   font-size: 12px;
   color: var(--text-dim);
+}
+
+.grade-change { display: inline-flex; align-items: center; gap: 8px; }
+.grade-badge { height: 44px; width: auto; background: #3a3a3a; border-radius: 6px; padding: 2px; }
+
+.mods-banner {
+  padding: 8px 20px;
+  font-size: 13px;
+  background: rgba(201, 143, 58, 0.14);
+  border-bottom: 1px solid var(--accent);
+  color: var(--text);
+}
+.mods-banner-title { color: var(--accent); font-weight: 600; }
+.mods-banner-note, .mods-banner-warn { color: var(--text-dim); }
+
+.mods-card-warning {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #7a2323;
+  border: 1px solid #b83a3a;
+  color: #fff;
+  font-size: 13px;
 }

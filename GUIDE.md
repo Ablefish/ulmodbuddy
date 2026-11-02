@@ -43,7 +43,7 @@ in the header to regenerate against your updated install -- see
 ## Searching and filtering
 
 Type in the search box to find any recipe, research topic, or workstation
-by name. The filter chips (**All / Recipes / Research / Workstations /
+by name. The filter chips (**All / Craftables / Research / Workstations /
 Items**) narrow the list to just one kind of entry -- useful once a search
 term matches a lot of different things.
 
@@ -224,6 +224,15 @@ Getting around a tree/grid bigger than the window:
 - **Clicking a node or recipe icon** jumps straight to that item/research's
   own detail page, same as clicking it in the search results.
 
+## Maintenance upgrades
+
+An item that can be upgraded at the maintenance bench (weapons, tools,
+armor) shows a **Maintenance Upgrades** section at the very bottom of its
+page. Each row is one grade step (H, G, F ... up to SSS), drawn with the
+same letter badge and tint the game uses, with the research that unlocks
+the step and what it costs. These are the same costs the Tweaks mod can
+scale.
+
 ## Vehicles
 
 Selecting a vehicle's own recipe/item page shows its stats up top, plus
@@ -239,6 +248,81 @@ Minibike, Motorcycle, Car, Van, Truck, and Gyrocopter Maintenance):
 ![All Vehicles comparison table, grouped by maintenance research, sorted by cargo capacity](docs/screenshots/vehicle-comparison-table.png)
 
 Click the column headers to re-sort by a different stat.
+
+## Tweaks: scale book and research costs
+
+The **Tweaks** button in the header generates a standalone mod that
+**overrides Undead Legacy's own recipes** to reduce -- or increase -- the
+book and research grind. It changes how many **Old Books** and **research
+data** items (Basic, Engineering, Advanced, Armor, Tools, Guns, Chemistry,
+Biology) the game asks for when you research a node, upgrade a workstation
+or upgrade an item at the maintenance bench. Nothing else is changed, and
+neither your install nor the Undead Legacy files are edited -- the result is
+a separate mod folder you add yourself, and the only thing in this tool that
+goes into your game.
+
+1. Click **Tweaks**. There are three rows, each with a **Books** and a
+   **Data** slider:
+   - **Research tree** -- the cost to research each node.
+   - **Workstation upgrades** -- the cost to upgrade a workstation to its
+     next tier.
+   - **Maintenance bench** -- the cost to upgrade a weapon, armor or tool
+     to its next grade. (If this row warns that maintenance data is
+     missing, click **Rebuild data** once.)
+
+   ![Tweaks window with Books and Data sliders for Research tree, Workstation upgrades and Maintenance bench, and a summary of how many cost lines will change](docs/screenshots/tweaks_menu.png)
+
+2. Drag the sliders (0%-200%, in steps of 10%). **100%** leaves a cost
+   alone, **0%** removes that ingredient entirely, and anything else is
+   rounded **up**, so a cost never silently shrinks to nothing. A summary
+   under the sliders shows how many ingredient lines will change.
+   **Reset all to 100%** puts everything back.
+3. Click **Download mod (.zip)**. Your slider settings are remembered for
+   next time.
+4. Right-click the zip, **Extract All...**, and extract it into your game's
+   `Mods` folder. You should end up with
+   `Mods\zz_ULModBuddyTweaks\ModInfo.xml` -- if it's one folder deeper
+   (`Mods\zz_ULModBuddyTweaks\zz_ULModBuddyTweaks\ModInfo.xml`), the game
+   won't see it; move the inner folder up a level.
+5. Restart the game. To undo everything, delete the `zz_ULModBuddyTweaks`
+   folder.
+
+   To check the game picked it up, press **F1** to open the console and scroll
+   up through the startup log (or search the newest `output_log_client` file in
+   `%APPDATA%\7DaysToDie\logs` for `ULModBuddyTweaks`). You should see a
+   `[MODS]` line mentioning `Mods/zz_ULModBuddyTweaks/Config`, highlighted here:
+
+   ![Game console log with a [MODS] line "Updating Localizations" for Mods/zz_ULModBuddyTweaks/Config highlighted in red](docs/screenshots/ingame_tweaks_mod_load.png)
+
+The mod loads after Undead Legacy (hence the `zz_` name) and rewrites each
+affected ingredient line with a precomputed number, so after you update
+Undead Legacy, **generate it again** -- the old numbers were worked out
+against the old version. A `README.txt` inside the zip records the
+settings used.
+
+### Seeing the tweaked costs in UL Mod Buddy
+
+Once the mod is in your `Mods` folder, click **Rebuild data**. The app
+notices it (and any other mod that changes recipes) and shows an
+**Additional mods found** banner under the header, with how many recipe
+patches it applied:
+
+![Header banner reading "Additional mods found: zz_ULModBuddyTweaks -- 2055 of 2055 recipe patches applied"](docs/screenshots/additional_mods_found_banner.png)
+
+Every page whose costs were changed by a mod carries a red **Costs include
+changes from mods** notice, so you never mistake a tweaked number for
+Undead Legacy's own. Undead Legacy's files on disk are unchanged either way.
+
+![Blacksmith's Forge (Tier 2) page with a red "Costs include changes from mods: zz_ULModBuddyTweaks" notice above its crafting cost](docs/screenshots/mod_warning_crafting_cost.png)
+
+For example, the Maintenance Station (Tier 4) normally asks for 750 Basic
+Research and 40 Old Books (highlighted):
+
+![Maintenance Station (Tier 4) crafting cost unmodified, with 750 Basic Research and 40 Old Book lines highlighted](docs/screenshots/crafting_recipe_unmodified.png)
+
+With the Tweaks mod set to remove those costs, both lines are gone:
+
+![Maintenance Station (Tier 4) crafting cost with the Tweaks mod applied -- the Basic Research and Old Book lines are gone](docs/screenshots/crafting_recipe_modified_by_tweaks.png)
 
 ## Keeping the data current
 

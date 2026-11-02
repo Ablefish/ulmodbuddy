@@ -163,6 +163,7 @@ window.ULModBuddyBuilder = (function () {
 
     return {
       rootHandle,
+      modsDir: await tryGetDir(rootHandle, "Mods"),
       modRoot,
       config,
       atlases,
@@ -172,6 +173,8 @@ window.ULModBuddyBuilder = (function () {
       ],
       upgradeFile: ref("Mods/UndeadLegacy/Config/Custom/recipes_upgrades.xml", await tryGetFile(custom, "recipes_upgrades.xml")),
       researchFile: ref("Mods/UndeadLegacy/Config/Custom/recipes_research.xml", await tryGetFile(custom, "recipes_research.xml")),
+      maintenanceFile: ref("Mods/UndeadLegacy/Config/Custom/recipes_maintenance.xml", await tryGetFile(custom, "recipes_maintenance.xml")),
+      qualityFile: ref("Mods/UndeadLegacy/Config/qualityinfo.xml", await tryGetFile(config, "qualityinfo.xml")),
       localizationFile: ref("Mods/UndeadLegacy/Config/Localization/English.txt", await tryGetFile(localizationDir, "English.txt")),
       baseLocalizationFile: ref("Data/Config/Localization.txt", await tryGetFile(dataConfig, "Localization.txt")),
       baseIconsDir: await tryGetDir(dataDir, "ItemIcons"),
@@ -499,6 +502,228 @@ window.ULModBuddyBuilder = (function () {
       upgrades[block] = { block, next: attr(el, "next"), tools, ingredients };
     }
     return upgrades;
+  }
+
+  // -------------------------------------------------------------------
+  // Maintenance-bench upgrades -- <modify group> blocks in
+  // recipes_maintenance.xml. Each item's MaintenanceGroup property names one
+  // group; each <upgrade quality="lo,hi"> inside is the cost to take an item
+  // currently in that quality band up to the next grade (1-10 is grade H,
+  // 11-20 is G, ... so H->G is the first entry). <repair> entries are
+  // skipped: they never use books or research data, and nothing here
+  // displays them.
+  //
+  // The file lists a handful of groups twice (an older copy left below a
+  // newer one). Which copy the game honours isn't known, so every copy is
+  // kept, tagged with its 1-based `copy` index in file order -- the tweak
+  // generator patches each one by position, and the item page shows copy 1.
+  // -------------------------------------------------------------------
+  // Undead Legacy's own tint per quality tier (qualityinfo.xml): key 1..9
+  // are grades H..S. Returned as {key: "RRGGBB"}.
+  async function loadQualityColors(paths) {
+    const colors = {};
+    const doc = await readAndParse(paths.qualityFile);
+    if (!doc) return colors;
+    for (const el of doc.getElementsByTagName("quality")) {
+      const key = el.getAttribute("key");
+      const color = el.getAttribute("color");
+      if (key && /^[0-9A-Fa-f]{6}$/.test(color || "")) colors[key] = color.toUpperCase();
+    }
+    return colors;
+  }
+
+  // -------------------------------------------------------------------
+  // Other mods in Mods/ (loaded after Undead Legacy, by folder name).
+  // The game merges every mod's Config/recipes.xml patches into the
+  // recipe document, so what the player sees is the base plus those
+  // patches. Only the patch shapes this app can map onto its own data
+  // (an ingredient's count changed or removed, on a recipe, research node,
+  // workstation upgrade or maintenance step) are applied; anything else is
+  // counted and reported so the banner can say it isn't reflected.
+  // -------------------------------------------------------------------
+  const INGREDIENT_SEL = String.raw`ingredient\[@name='([^']+)'\](?:\[(\d+)\])?`;
+  const PATCH_SHAPES = [
+    { kind: "research", re: new RegExp(String.raw`^/recipes/research\[@name='([^']+)'\]/` + INGREDIENT_SEL + "$") },
+    { kind: "upgrade", re: new RegExp(String.raw`^/recipes/upgrade\[@block='([^']+)'\]/` + INGREDIENT_SEL + "$") },
+    { kind: "recipe", re: new RegExp(String.raw`^/recipes/recipe\[@name='([^']+)'\]/` + INGREDIENT_SEL + "$") },
+    {
+      kind: "modify",
+      re: new RegExp(
+        String.raw`^/recipes/modify\[@(group|name)='([^']+)'\](?:\[(\d+)\])?/upgrade\[@quality='([^']+)'\]/` + INGREDIENT_SEL + "$"
+      ),
+    },
+  ];
+
+  // Ingredient lists a patch xpath points at: [{list, name, k}]
+  function patchTargets(data, xpath) {
+    for (const shape of PATCH_SHAPES) {
+      const m = shape.re.exec(xpath);
+      if (!m) continue;
+      if (shape.kind === "research") {
+        const n = data.research[m[1]];
+        return n ? [{ list: n.ingredients, name: m[2], k: m[3] }] : [];
+      }
+      if (shape.kind === "upgrade") {
+        const u = data.upgrades[m[1]];
+        return u ? [{ list: u.ingredients, name: m[2], k: m[3] }] : [];
+      }
+      if (shape.kind === "recipe") {
+        return (data.recipesByName[m[1]] || []).map((id) => ({ list: data.recipes[id].ingredients, name: m[2], k: m[3] }));
+      }
+      const [, attr, key, copy, quality, ingName, k] = m;
+      const out = [];
+      for (const b of data.maintenance) {
+        if ((attr === "group" ? b.group : b.name) !== key) continue;
+        if (copy && b.copy !== Number(copy)) continue;
+        for (const up of b.upgrades) if (up.quality === quality) out.push({ list: up.ingredients, name: ingName, k });
+      }
+      return out;
+    }
+    return null; // not a shape we understand
+  }
+
+  function applyIngredientPatch(target, op, value) {
+    const hits = [];
+    target.list.forEach((ing, i) => {
+      if (ing.name === target.name) hits.push(i);
+    });
+    const chosen = target.k ? hits.slice(Number(target.k) - 1, Number(target.k)) : hits;
+    if (!chosen.length) return false;
+    if (op === "set") {
+      for (const i of chosen) target.list[i].count = String(value);
+    } else {
+      for (const i of chosen.slice().reverse()) target.list.splice(i, 1);
+    }
+    return true;
+  }
+
+  async function applyOtherMods(paths, data) {
+    const found = [];
+    if (!paths.modsDir) return found;
+    const folders = [];
+    for await (const [name, handle] of paths.modsDir.entries()) {
+      if (handle.kind === "directory" && name !== "UndeadLegacy" && name !== "0_TFP_Harmony") folders.push([name, handle]);
+    }
+    folders.sort((a, b) => a[0].toLowerCase().localeCompare(b[0].toLowerCase()));
+    for (const [folder, dir] of folders) {
+      const infoText = await readText(ref(`Mods/${folder}/ModInfo.xml`, await tryGetFile(dir, "ModInfo.xml")));
+      if (infoText == null) continue; // not a mod
+      const attrOf = (tag) => {
+        const m = new RegExp(`<${tag}\s+value="([^"]*)"`, "i").exec(infoText);
+        return m ? m[1] : null;
+      };
+      const entry = {
+        folder,
+        name: attrOf("DisplayName") || attrOf("Name") || folder,
+        version: attrOf("Version"),
+        patches: 0,
+        applied: 0,
+        unsupported: 0,
+        examples: [],
+      };
+      const config = await tryGetDir(dir, "Config");
+      const recipesText = await readText(ref(`Mods/${folder}/Config/recipes.xml`, await tryGetFile(config, "recipes.xml")));
+      if (recipesText) {
+        const text = recipesText.replace(/<!--[\s\S]*?-->/g, "");
+        const re = /<(setattribute|remove)\s+xpath="([^"]*)"(?:\s+name="([^"]*)")?\s*(?:\/>|>([\s\S]*?)<\/\1>)/g;
+        let m;
+        while ((m = re.exec(text))) {
+          entry.patches++;
+          const [, tag, xpath, attrName, value] = m;
+          const isCount = tag === "remove" || attrName === "count";
+          const targets = isCount ? patchTargets(data, xpath) : null;
+          let ok = false;
+          if (targets) for (const t of targets) ok = applyIngredientPatch(t, tag === "remove" ? "remove" : "set", (value || "").trim()) || ok;
+          if (ok) entry.applied++;
+          else if (targets === null || !isCount) {
+            entry.unsupported++;
+            if (entry.examples.length < 3) entry.examples.push(xpath);
+          } // else: understood, but its target isn't in this install -- nothing to change
+        }
+      }
+      if (entry.unsupported) {
+        warn(`Mods/${folder}: ${entry.unsupported} recipes.xml patch(es) of a kind this app can't apply, e.g. ${entry.examples[0]}`);
+      }
+      found.push(entry);
+    }
+    return found;
+  }
+
+  async function loadMaintenance(paths) {
+    const blocks = [];
+    const doc = await readAndParse(paths.maintenanceFile);
+    if (!doc) return blocks;
+    const seen = {};
+    for (const el of scanBlocks(doc, "modify")) {
+      // `group` blocks cover every item sharing a MaintenanceGroup; a few
+      // one-off `name` blocks cover a single item by its own name.
+      const group = attr(el, "group");
+      const name = attr(el, "name");
+      const key = group || name;
+      if (!key) {
+        warn(`${paths.maintenanceFile.label}: <modify> with neither group nor name attribute, skipped`);
+        continue;
+      }
+      seen[key] = (seen[key] || 0) + 1;
+      const upgrades = directChildren(el, "upgrade").map((u) => ({
+        quality: attr(u, "quality"),
+        area: attr(u, "area"),
+        ingredients: directChildren(u, "ingredient").map((c) => ({
+          name: attr(c, "name"),
+          count: attr(c, "count", "1"),
+        })),
+      }));
+      blocks.push({ group, name: group ? null : name, copy: seen[key], upgrades });
+    }
+    const dupes = Object.keys(seen).filter((g) => seen[g] > 1);
+    if (dupes.length) {
+      warn(
+        `${dupes.length} maintenance group(s) are defined more than once in ` +
+          `recipes_maintenance.xml (${dupes.join(", ")}) -- the first copy is shown`
+      );
+    }
+    return blocks;
+  }
+
+  // -------------------------------------------------------------------
+  // Item -> maintenance group: the MaintenanceGroup property on <item>
+  // elements (or a patch to one). An item that doesn't set its own inherits
+  // its Extends parent's.
+  // -------------------------------------------------------------------
+  async function loadItemMaintenanceGroups(paths) {
+    const own = {};
+    const parent = {};
+    for (const fileRef of paths.itemFiles) {
+      const doc = await readAndParse(fileRef);
+      if (!doc) continue;
+      // Most gear is a fresh <item>, but the mod also gives vanilla items
+      // (the auger, the base pistols...) their group by patching them with
+      // <set xpath="/items/item[@name='X']"> -- ~60 of them -- so those
+      // count too. Only exact single-item xpaths; a bare "/items" wrapper
+      // has no name and is skipped.
+      for (const tag of ["item", "set", "append", "insertAfter", "insertBefore"]) {
+        for (const el of scanBlocks(doc, tag)) {
+          const xm = /^\/items\/item\[@name='([^']+)'\]$/.exec(attr(el, "xpath") || "");
+          const name = tag === "item" ? attr(el, "name") : xm && xm[1];
+          if (!name) continue;
+          for (const prop of directChildren(el, "property")) {
+            const pname = attr(prop, "name");
+            if (pname === "MaintenanceGroup") own[name] = attr(prop, "value");
+            else if (pname === "Extends") parent[name] = attr(prop, "value");
+          }
+        }
+      }
+    }
+    const resolve = (name, depth) => {
+      if (own[name]) return own[name];
+      return depth > 8 || !parent[name] ? null : resolve(parent[name], depth + 1);
+    };
+    const out = {};
+    for (const name of new Set([...Object.keys(own), ...Object.keys(parent)])) {
+      const g = resolve(name, 0);
+      if (g) out[name] = g;
+    }
+    return out;
   }
 
   // -------------------------------------------------------------------
@@ -2227,6 +2452,9 @@ window.ULModBuddyBuilder = (function () {
   // dataset and reused after a reload is already dead. Caching the Blob
   // itself (structured-clone-storable, unlike the URL string) lets a fresh,
   // valid URL be minted from it on every page load instead.
+  // symbol_quality_1..9 = grades H..S, _max = SSS (in-game maintenance badges).
+  const GRADE_ICON_STEMS = [...Array(9).keys()].map((n) => `symbol_quality_${n + 1}`).concat("symbol_quality_max");
+
   const iconCache = new Map(); // stem -> Promise<{blob, url}>
 
   async function resolveIcon(name, iconIndex, customIcons, usedIcons) {
@@ -2300,9 +2528,19 @@ window.ULModBuddyBuilder = (function () {
     const upgrades = await loadUpgrades(paths);
     log(`  ${Object.keys(upgrades).length} upgrades`);
 
+    log("Loading maintenance-bench upgrades...");
+    const maintenance = await loadMaintenance(paths);
+    const maintenanceByItem = await loadItemMaintenanceGroups(paths);
+    log(`  ${maintenance.length} maintenance groups`);
+
     log("Loading research tree...");
     const research = await loadResearch(paths);
     log(`  ${Object.keys(research).length} research nodes`);
+
+    const dataForMods = { recipes, recipesByName, upgrades, maintenance, research };
+    const tweakBase = JSON.parse(JSON.stringify({ research, upgrades, maintenance }));
+    const otherMods = await applyOtherMods(paths, dataForMods);
+    for (const m of otherMods) log(`  other mod: ${m.folder} -- ${m.applied} of ${m.patches} recipe patch(es) applied`);
 
     log("Computing unlock pathways...");
     const { availableStations, unlockCounts } = computeUnlocks(recipes, research, upgrades);
@@ -2499,6 +2737,15 @@ window.ULModBuddyBuilder = (function () {
         else if (source === "extends") extendsUsed.push(nm);
       }
     }
+    // Maintenance grade badges (H..SSS) -- UI sprites, not item icons, so
+    // they never show up via allNames; added under their own sprite stems.
+    for (const stem of GRADE_ICON_STEMS) {
+      const res = await resolveIcon(stem, iconIndex, customIcons, usedIcons);
+      if (res) {
+        icons[stem] = res.url;
+        iconBlobs[stem] = res.blob;
+      }
+    }
     log(
       `  ${Object.keys(icons).length} icons resolved of ${allNames.size} distinct names ` +
         `(${fallbackUsed.length} via variant-skin fallback, ${baseGameUsed.length} via base-game icon, ` +
@@ -2618,6 +2865,13 @@ window.ULModBuddyBuilder = (function () {
       recipes,
       recipesByName,
       upgrades,
+      maintenance,
+      maintenanceByItem,
+      qualityColors: await loadQualityColors(paths),
+      otherMods,
+      // Pre-overlay copies: the Tweaks generator patches the base counts, so it
+      // must not start from numbers another mod (e.g. a previous Tweaks zip) changed.
+      tweakBase: otherMods.some((m) => m.applied) ? tweakBase : undefined,
       research,
     };
 

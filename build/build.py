@@ -18,6 +18,7 @@ form and calls main() in-process), or standalone: python3 build.py [path].
 import re
 import sys
 import csv
+import copy
 import json
 import math
 import shutil
@@ -45,7 +46,7 @@ CONFIG_LOCAL_FILE = BUILD_DIR / "config.local.json"    # gitignored; remembers t
 # Set by configure_paths(); left as None so any accidental use before it
 # runs fails loudly instead of silently reading some other machine's paths.
 SRC = MOD_ROOT = CONFIG = ATLASES = None
-RECIPE_FILES = UPGRADE_FILE = RESEARCH_FILE = None
+RECIPE_FILES = UPGRADE_FILE = RESEARCH_FILE = MAINTENANCE_FILE = None
 LOCALIZATION_FILE = BASE_LOCALIZATION_FILE = BASE_ICONS_DIR = None
 ITEM_FILES = BLOCK_FILES = None
 BASE_ITEM_FILE = BASE_BLOCK_FILE = None
@@ -92,7 +93,7 @@ def configure_paths(install_root):
     process, which app/server.py does every time someone submits the build
     form (initial setup, and any later "Rebuild data")."""
     global SRC, MOD_ROOT, CONFIG, ATLASES
-    global RECIPE_FILES, UPGRADE_FILE, RESEARCH_FILE
+    global RECIPE_FILES, UPGRADE_FILE, RESEARCH_FILE, MAINTENANCE_FILE
     global LOCALIZATION_FILE, BASE_LOCALIZATION_FILE, BASE_ICONS_DIR
     global ITEM_FILES, BLOCK_FILES, BASE_ITEM_FILE, BASE_BLOCK_FILE
     global MOD_ITEM_MODIFIERS_FILE, BASE_ITEM_MODIFIERS_FILE
@@ -118,6 +119,7 @@ def configure_paths(install_root):
     ]
     UPGRADE_FILE = CONFIG / "Custom" / "recipes_upgrades.xml"
     RESEARCH_FILE = CONFIG / "Custom" / "recipes_research.xml"
+    MAINTENANCE_FILE = CONFIG / "Custom" / "recipes_maintenance.xml"
     LOCALIZATION_FILE = CONFIG / "Localization" / "English.txt"
     # The mod's own Localization.txt only covers strings Undead Legacy adds
     # or overrides. Vanilla items the mod never redefines (just patches via
@@ -512,6 +514,234 @@ def load_upgrades():
             "ingredients": ingredients,
         }
     return upgrades
+
+
+# ---------------------------------------------------------------------------
+# Maintenance-bench upgrades -- <modify group> blocks in recipes_maintenance.xml.
+# Each item's MaintenanceGroup property names one group; each
+# <upgrade quality="lo,hi"> inside is the cost to take an item currently in
+# that quality band up to the next grade (1-10 is grade H, 11-20 is G, ...,
+# so H->G is the first entry). <repair> entries are skipped: they never use
+# books or research data, and nothing displays them.
+#
+# The file lists a handful of groups twice (an older copy left below a newer
+# one). Which copy the game honours isn't known, so every copy is kept,
+# tagged with its 1-based `copy` index in file order -- the tweak generator
+# patches each one by position, and the item page shows copy 1.
+# ---------------------------------------------------------------------------
+def load_quality_colors():
+    """Undead Legacy's own tint per quality tier (qualityinfo.xml): key 1..9
+    are grades H..S. Returned as {key: "RRGGBB"}."""
+    path = CONFIG / "qualityinfo.xml"
+    if not path.exists():
+        warn(f"missing expected file: {path}")
+        return {}
+    text = re.sub(r"<!--.*?-->", "", read_text(path), flags=re.S)
+    return {m.group(1): m.group(2).upper()
+            for m in re.finditer(r'<quality\s+key="(\d+)"\s+color="([0-9A-Fa-f]{6})"', text)}
+
+
+# ---------------------------------------------------------------------------
+# Other mods in Mods/ (loaded after Undead Legacy, by folder name). The game
+# merges every mod's Config/recipes.xml patches into the recipe document, so
+# what the player sees is the base plus those patches. Only the patch shapes
+# this app can map onto its own data (an ingredient's count changed or
+# removed, on a recipe, research node, workstation upgrade or maintenance
+# step) are applied; anything else is counted and reported so the banner can
+# say it isn't reflected. Mirrors applyOtherMods() in app/build.js.
+# ---------------------------------------------------------------------------
+_ING_SEL = r"ingredient\[@name='([^']+)'\](?:\[(\d+)\])?"
+_PATCH_SHAPES = [
+    ("research", re.compile(r"^/recipes/research\[@name='([^']+)'\]/" + _ING_SEL + "$")),
+    ("upgrade", re.compile(r"^/recipes/upgrade\[@block='([^']+)'\]/" + _ING_SEL + "$")),
+    ("recipe", re.compile(r"^/recipes/recipe\[@name='([^']+)'\]/" + _ING_SEL + "$")),
+    ("modify", re.compile(
+        r"^/recipes/modify\[@(group|name)='([^']+)'\](?:\[(\d+)\])?/upgrade\[@quality='([^']+)'\]/" + _ING_SEL + "$")),
+]
+
+
+def _patch_targets(data, xpath):
+    """Ingredient lists a patch xpath points at: [(list, name, k)], or None
+    when the xpath isn't a shape we understand."""
+    for kind, rx in _PATCH_SHAPES:
+        m = rx.match(xpath)
+        if not m:
+            continue
+        g = m.groups()
+        if kind == "research":
+            n = data["research"].get(g[0])
+            return [(n["ingredients"], g[1], g[2])] if n else []
+        if kind == "upgrade":
+            u = data["upgrades"].get(g[0])
+            return [(u["ingredients"], g[1], g[2])] if u else []
+        if kind == "recipe":
+            return [(data["recipes"][i]["ingredients"], g[1], g[2])
+                    for i in data["recipes_by_name"].get(g[0], [])]
+        attr, key, copy, quality, ing, k = g
+        out = []
+        for b in data["maintenance"]:
+            if (b["group"] if attr == "group" else b["name"]) != key:
+                continue
+            if copy and b["copy"] != int(copy):
+                continue
+            for up in b["upgrades"]:
+                if up["quality"] == quality:
+                    out.append((up["ingredients"], ing, k))
+        return out
+    return None
+
+
+def _apply_ingredient_patch(target, op, value):
+    lst, name, k = target
+    hits = [i for i, ing in enumerate(lst) if ing["name"] == name]
+    chosen = hits[int(k) - 1:int(k)] if k else hits
+    if not chosen:
+        return False
+    if op == "set":
+        for i in chosen:
+            lst[i]["count"] = str(value)
+    else:
+        for i in reversed(chosen):
+            del lst[i]
+    return True
+
+
+def apply_other_mods(data):
+    found = []
+    mods_dir = SRC / "Mods"
+    if not mods_dir.exists():
+        return found
+    folders = sorted(
+        (d for d in mods_dir.iterdir()
+         if d.is_dir() and d.name not in ("UndeadLegacy", "0_TFP_Harmony")),
+        key=lambda d: d.name.lower())
+    for d in folders:
+        info = d / "ModInfo.xml"
+        if not info.exists():
+            continue
+        info_text = read_text(info)
+
+        def attr_of(tag):
+            m = re.search(rf'<{tag}\s+value="([^"]*)"', info_text, re.I)
+            return m.group(1) if m else None
+
+        entry = {"folder": d.name, "name": attr_of("DisplayName") or attr_of("Name") or d.name,
+                 "version": attr_of("Version"), "patches": 0, "applied": 0,
+                 "unsupported": 0, "examples": []}
+        rpath = d / "Config" / "recipes.xml"
+        if rpath.exists():
+            text = re.sub(r"<!--.*?-->", "", read_text(rpath), flags=re.S)
+            rx = re.compile(r'<(setattribute|remove)\s+xpath="([^"]*)"(?:\s+name="([^"]*)")?\s*(?:/>|>(.*?)</\1>)', re.S)
+            for m in rx.finditer(text):
+                entry["patches"] += 1
+                tag, xpath, attr_name, value = m.groups()
+                is_count = tag == "remove" or attr_name == "count"
+                targets = _patch_targets(data, xpath) if is_count else None
+                ok = False
+                if targets:
+                    for t in targets:
+                        ok = _apply_ingredient_patch(t, "remove" if tag == "remove" else "set", (value or "").strip()) or ok
+                if ok:
+                    entry["applied"] += 1
+                elif targets is None or not is_count:
+                    entry["unsupported"] += 1
+                    if len(entry["examples"]) < 3:
+                        entry["examples"].append(xpath)
+        if entry["unsupported"]:
+            warn(f"Mods/{d.name}: {entry['unsupported']} recipes.xml patch(es) of a kind this app can't apply, "
+                 f"e.g. {entry['examples'][0]}")
+        found.append(entry)
+    return found
+
+
+def load_maintenance():
+    blocks = []
+    if not MAINTENANCE_FILE.exists():
+        warn(f"missing expected file: {MAINTENANCE_FILE}")
+        return blocks
+    text = read_text(MAINTENANCE_FILE)
+    seen = {}
+    for frag in scan_blocks(text, "modify"):
+        el = parse_fragment(frag, MAINTENANCE_FILE.name)
+        if el is None:
+            continue
+        # `group` blocks cover every item sharing a MaintenanceGroup; a few
+        # one-off `name` blocks cover a single item by its own name.
+        group = el.attrib.get("group")
+        name = el.attrib.get("name")
+        key = group or name
+        if not key:
+            warn(f"{MAINTENANCE_FILE.name}: <modify> with neither group nor name attribute, skipped")
+            continue
+        seen[key] = seen.get(key, 0) + 1
+        upgrades = [
+            {
+                "quality": u.attrib.get("quality"),
+                "area": u.attrib.get("area"),
+                "ingredients": [
+                    {"name": c.attrib.get("name"), "count": c.attrib.get("count", "1")}
+                    for c in u if c.tag == "ingredient"
+                ],
+            }
+            for u in el if u.tag == "upgrade"
+        ]
+        blocks.append({"group": group, "name": None if group else name, "copy": seen[key], "upgrades": upgrades})
+    dupes = [g for g, n in seen.items() if n > 1]
+    if dupes:
+        warn(f"{len(dupes)} maintenance group(s) are defined more than once in "
+             f"recipes_maintenance.xml ({', '.join(dupes)}) -- the first copy is shown")
+    return blocks
+
+
+# ---------------------------------------------------------------------------
+# Item -> maintenance group: the MaintenanceGroup property on <item>
+# elements. An item that doesn't set its own inherits its Extends parent's.
+# ---------------------------------------------------------------------------
+def load_item_maintenance_groups():
+    own, parent = {}, {}
+    for path in ITEM_FILES:
+        if not path.exists():
+            continue
+        text = read_text(path)
+        # Most gear is a fresh <item>, but the mod also gives vanilla items
+        # (the auger, the base pistols...) their group by patching them with
+        # <set xpath="/items/item[@name='X']"> -- ~60 of them -- so those
+        # count too. Only exact single-item xpaths; a bare "/items" wrapper
+        # has no name and is skipped.
+        for tag in ("item", "set", "append", "insertAfter", "insertBefore"):
+            for frag in scan_blocks(text, tag):
+                el = parse_fragment(frag, path.name)
+                if el is None:
+                    continue
+                if tag == "item":
+                    name = el.attrib.get("name")
+                else:
+                    xm = re.fullmatch(r"/items/item\[@name='([^']+)'\]", el.attrib.get("xpath", ""))
+                    name = xm.group(1) if xm else None
+                if not name:
+                    continue
+                for prop in el:
+                    if prop.tag != "property":
+                        continue
+                    pname = prop.attrib.get("name")
+                    if pname == "MaintenanceGroup":
+                        own[name] = prop.attrib.get("value")
+                    elif pname == "Extends":
+                        parent[name] = prop.attrib.get("value")
+
+    def resolve(name, depth=0):
+        if own.get(name):
+            return own[name]
+        if depth > 8 or not parent.get(name):
+            return None
+        return resolve(parent[name], depth + 1)
+
+    out = {}
+    for name in set(own) | set(parent):
+        g = resolve(name)
+        if g:
+            out[name] = g
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -2338,6 +2568,10 @@ def load_custom_icons():
 # ---------------------------------------------------------------------------
 # Icon index -- every PNG under UIAtlases, keyed by filename stem
 # ---------------------------------------------------------------------------
+# symbol_quality_1..9 = grades H..S, _max = SSS (in-game maintenance badges).
+GRADE_ICON_STEMS = [f"symbol_quality_{n}" for n in range(1, 10)] + ["symbol_quality_max"]
+
+
 def index_icons():
     index = {}  # stem -> Path, first folder wins in FOLDER_PRIORITY order
     folder_priority = [
@@ -2753,11 +2987,21 @@ def main(install_root):
     upgrades = load_upgrades()
     print(f"  {len(upgrades)} upgrades")
 
+    print("Loading maintenance-bench upgrades...")
+    maintenance = load_maintenance()
+    maintenance_by_item = load_item_maintenance_groups()
+    print(f"  {len(maintenance)} maintenance groups")
+
     print("Loading research tree...")
     research = load_research()
     print(f"  {len(research)} research nodes")
 
     print("Computing unlock pathways...")
+    tweak_base = copy.deepcopy({"research": research, "upgrades": upgrades, "maintenance": maintenance})
+    other_mods = apply_other_mods({"recipes": recipes, "recipes_by_name": recipes_by_name, "upgrades": upgrades,
+                                   "maintenance": maintenance, "research": research})
+    for m in other_mods:
+        print(f"  other mod: {m['folder']} -- {m['applied']} of {m['patches']} recipe patch(es) applied")
     available_stations = compute_unlocks(recipes, research, upgrades)
     unlock_counts = {}
     for r in recipes.values():
@@ -2976,6 +3220,12 @@ def main(install_root):
                 base_game_used.append(nm)
             elif source == "extends":
                 extends_used.append(nm)
+    # Maintenance grade badges (H..SSS) -- UI sprites, not item icons, so
+    # they never show up via all_names; added under their own sprite stems.
+    for stem in GRADE_ICON_STEMS:
+        rel = resolve_icon(stem, icon_index, custom_icons, used_icons)
+        if rel:
+            icons[stem] = rel
     print(f"  {len(icons)} icons resolved of {len(all_names)} distinct names "
           f"({len(fallback_used)} via variant-skin fallback, {len(base_game_used)} via base-game icon, "
           f"{len(extends_used)} via Extends ancestor)")
@@ -3112,8 +3362,16 @@ def main(install_root):
         "recipes": recipes,
         "recipesByName": recipes_by_name,
         "upgrades": upgrades,
+        "maintenance": maintenance,
+        "maintenanceByItem": maintenance_by_item,
+        "qualityColors": load_quality_colors(),
+        "otherMods": other_mods,
         "research": research,
     }
+    # Pre-overlay copies: the Tweaks generator patches the base counts, so it
+    # must not start from numbers another mod (e.g. a previous Tweaks zip) changed.
+    if any(m["applied"] for m in other_mods):
+        dataset["tweakBase"] = tweak_base
 
     APP.mkdir(parents=True, exist_ok=True)
     out_path = APP / "data.js"
