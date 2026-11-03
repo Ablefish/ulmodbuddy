@@ -3,6 +3,20 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.5.1] - 2026-11-03
+
+### Changed
+
+- **README rewrite of the intro** -- opens with what Undead Legacy changes
+  (crafting, harvesting, repairs, upgrades, new vehicles and weapons), what
+  UL Mod Buddy adds, and the Tweaks mod generator.
+- **Clearer install options** -- a horizontal rule now separates Zero
+  download, Zero install and Python.
+- **Notes & Caveats** -- the "tested" note now says it has only been tried on
+  a clean install with or without the Tweaks mod, with other third-party mods
+  untested, and "Desktop only" explains that the app reads your local game
+  files.
+
 ## [1.5.0] - 2026-11-01
 
 ### Added

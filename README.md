@@ -1,10 +1,16 @@
 # UL Mod Buddy
 
-Stop alt-tabbing to a wiki that's three updates behind. **UL Mod Buddy** is
-a searchable crafting, research, and loot reference for the
-[Undead Legacy](http://ul.subquake.com) mod for *7 Days to Die*, built
-straight from your own install -- so it's always current with whatever
-version you're actually running.
+[Undead Legacy](http://ul.subquake.com) is a complete overhaul of *7 Days
+to Die*: crafting, harvesting, repairs and upgrades are all reworked around
+new research, workstation and maintenance systems, and it adds new vehicles
+and weapons on top. That depth means a lot of resources to keep track of.
+
+**UL Mod Buddy** is a searchable crafting, research, and loot reference that
+guides you to what you need and how to get it. It's built straight from your
+own install, so it's always current with whatever version you're actually
+running. It can also generate your own custom **Tweaks** mod, which overrides
+some of Undead Legacy's grindier recipes to cut (or raise) the Old Book and
+research-data costs.
 
 New here? The **[User Guide](GUIDE.md)** walks through all of this with
 screenshots.
@@ -61,6 +67,8 @@ Your folder and the built dataset are both remembered for next time, so a
 returning visit loads instantly. Click **Rebuild data** in the header any
 time you update the mod.
 
+---
+
 ### Zero install
 
 Same mechanism as above, just from your own local copy instead of the
@@ -78,6 +86,8 @@ Chrome and Edge support the underlying browser API out of the box.
 **Brave** ships the same engine but disables it by default -- flip it on
 at `brave://flags/#file-system-access-api`, or just use Chrome/Edge.
 Firefox and Safari don't support it at all -- use Python below instead.
+
+---
 
 ### Python
 
@@ -116,9 +126,6 @@ Click **Rebuild data** in the header any time you update the mod.
 ## Notes & Caveats
 
 - **This is 100% a hobby project!**
-- **Tested on a clean install only.** It's only been tried against a
-  clean Undead Legacy install -- no other mods. Other mods that change the
-  same XML files may give odd or missing results.
 - **The Tweaks mod is the one thing this tool produces.** Everything else
   is read-only. Tweaks generates a standalone mod that overrides Undead
   Legacy's research and upgrade recipes (to reduce or increase the
@@ -126,8 +133,13 @@ Click **Rebuild data** in the header any time you update the mod.
   own `Mods` folder -- see
   [Tweaks](GUIDE.md#tweaks-scale-book-and-research-costs) in the guide.
   Regenerate it after updating Undead Legacy.
-- Desktop only -- not tested on phones or tablets, and the browser-based
-  setups rely on an API mobile browsers largely don't support yet.
+- **Tested on a clean install and the Tweaks mod only.** It's only been
+  tried against a clean Undead Legacy install, with or without the Tweaks
+  mod this tool generates. Other third-party mods that change the same XML
+  files may give odd or missing results.
+- **Desktop only.** The app builds its data from the game files in your own
+  *7 Days to Die* install, so it's meant for the computer the game is installed
+  on, not for phones or tablets.
 - Every warning about the mod's own data (unresolved references, likely
   typos, missing localization) is visible in-app via the "N build
   warning(s)" link in the header, not just in a terminal.
