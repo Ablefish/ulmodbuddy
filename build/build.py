@@ -561,8 +561,9 @@ _PATCH_SHAPES = [
 
 
 def _patch_targets(data, xpath):
-    """Ingredient lists a patch xpath points at: [(list, name, k)], or None
-    when the xpath isn't a shape we understand."""
+    """Ingredient lists a patch xpath points at: [(list, name, k, holder)],
+    or None when the xpath isn't a shape we understand. `holder` is the dict
+    that owns the list, where a removed line is remembered."""
     for kind, rx in _PATCH_SHAPES:
         m = rx.match(xpath)
         if not m:
@@ -570,12 +571,12 @@ def _patch_targets(data, xpath):
         g = m.groups()
         if kind == "research":
             n = data["research"].get(g[0])
-            return [(n["ingredients"], g[1], g[2])] if n else []
+            return [(n["ingredients"], g[1], g[2], n)] if n else []
         if kind == "upgrade":
             u = data["upgrades"].get(g[0])
-            return [(u["ingredients"], g[1], g[2])] if u else []
+            return [(u["ingredients"], g[1], g[2], u)] if u else []
         if kind == "recipe":
-            return [(data["recipes"][i]["ingredients"], g[1], g[2])
+            return [(data["recipes"][i]["ingredients"], g[1], g[2], data["recipes"][i])
                     for i in data["recipes_by_name"].get(g[0], [])]
         attr, key, copy, quality, ing, k = g
         out = []
@@ -586,22 +587,83 @@ def _patch_targets(data, xpath):
                 continue
             for up in b["upgrades"]:
                 if up["quality"] == quality:
-                    out.append((up["ingredients"], ing, k))
+                    out.append((up["ingredients"], ing, k, up))
         return out
     return None
 
 
+def _container_targets(data, xpath):
+    """Ingredient lists a patch xpath's own container points at (for
+    <append> / <insertAfter> / <insertBefore>, which add lines): a recipe,
+    research node, workstation upgrade or maintenance step. Returns
+    [(list, holder)], or None when the shape isn't understood."""
+    base = re.sub(r"/ingredient\[.*$", "", xpath)
+    m = re.match(r"^/recipes/research\[@name='([^']+)'\]$", base)
+    if m:
+        n = data["research"].get(m.group(1))
+        return [(n["ingredients"], n)] if n else []
+    m = re.match(r"^/recipes/upgrade\[@block='([^']+)'\]$", base)
+    if m:
+        u = data["upgrades"].get(m.group(1))
+        return [(u["ingredients"], u)] if u else []
+    m = re.match(r"^/recipes/recipe\[@name='([^']+)'\]$", base)
+    if m:
+        return [(data["recipes"][i]["ingredients"], data["recipes"][i])
+                for i in data["recipes_by_name"].get(m.group(1), [])]
+    m = re.match(r"^/recipes/modify\[@(group|name)='([^']+)'\](?:\[(\d+)\])?/upgrade\[@quality='([^']+)'\]$", base)
+    if m:
+        attr, key, copy, quality = m.groups()
+        out = []
+        for b in data["maintenance"]:
+            if (b["group"] if attr == "group" else b["name"]) != key:
+                continue
+            if copy and b["copy"] != int(copy):
+                continue
+            for up in b["upgrades"]:
+                if up["quality"] == quality:
+                    out.append((up["ingredients"], up))
+        return out
+    return None
+
+
+def _apply_added_ingredients(data, xpath, body):
+    """<append>/<insertAfter>/<insertBefore> of <ingredient> lines. Each added
+    line is marked was="0" (it didn't exist before the mod) so the app shows it
+    as new. Returns True if anything was added, None if the shape isn't ours."""
+    targets = _container_targets(data, xpath)
+    lines = re.findall(r"<ingredient\s+([^>]*?)/?>", body or "")
+    if targets is None or not lines:
+        return None
+    added = False
+    for lst, _holder in targets:
+        for attrs in lines:
+            nm = re.search(r'name="([^"]*)"', attrs)
+            ct = re.search(r'count="([^"]*)"', attrs)
+            if nm:
+                lst.append({"name": nm.group(1), "count": ct.group(1) if ct else "1", "was": "0"})
+                added = True
+    return added
+
+
 def _apply_ingredient_patch(target, op, value):
-    lst, name, k = target
+    """Applies one patch and remembers the original count so the app can show
+    the change: a changed line keeps its first-seen value in `was`; a removed
+    line leaves the list (cost maths never sees it) but is recorded in the
+    holder's `removedIngredients` so it can still be displayed."""
+    lst, name, k, holder = target
     hits = [i for i, ing in enumerate(lst) if ing["name"] == name]
     chosen = hits[int(k) - 1:int(k)] if k else hits
     if not chosen:
         return False
     if op == "set":
         for i in chosen:
+            lst[i].setdefault("was", lst[i]["count"])
             lst[i]["count"] = str(value)
     else:
         for i in reversed(chosen):
+            ing = lst[i]
+            holder.setdefault("removedIngredients", []).append(
+                {"name": ing["name"], "was": ing.get("was", ing["count"])})
             del lst[i]
     return True
 
@@ -631,10 +693,18 @@ def apply_other_mods(data):
         rpath = d / "Config" / "recipes.xml"
         if rpath.exists():
             text = re.sub(r"<!--.*?-->", "", read_text(rpath), flags=re.S)
-            rx = re.compile(r'<(setattribute|remove)\s+xpath="([^"]*)"(?:\s+name="([^"]*)")?\s*(?:/>|>(.*?)</\1>)', re.S)
+            rx = re.compile(r'<(setattribute|remove|append|insertAfter|insertBefore)\s+xpath="([^"]*)"(?:\s+name="([^"]*)")?\s*(?:/>|>(.*?)</\1>)', re.S)
             for m in rx.finditer(text):
                 entry["patches"] += 1
                 tag, xpath, attr_name, value = m.groups()
+                if tag in ("append", "insertAfter", "insertBefore"):
+                    if _apply_added_ingredients(data, xpath, value):
+                        entry["applied"] += 1
+                    else:
+                        entry["unsupported"] += 1
+                        if len(entry["examples"]) < 3:
+                            entry["examples"].append(xpath)
+                    continue
                 is_count = tag == "remove" or attr_name == "count"
                 targets = _patch_targets(data, xpath) if is_count else None
                 ok = False
@@ -1784,9 +1854,10 @@ def load_recycle_data():
                 # is unambiguously a count the author meant to write, not a
                 # probability -- stored as such, flagged rather than crashed
                 # on or silently misread as a real probability.
-                warn(f"{RECYCLE_FILE.name}: <output name=\"{out_name}\"> has prob=\"{prob_attr}\" "
-                     f"(a comma-range, never valid for a probability) -- treated as the count "
-                     f"attribute the author meant, prob=1")
+                warn(f"{RECYCLE_FILE.name}: recycling '{', '.join(input_names)}' -- "
+                     f"<output name=\"{out_name}\"> uses the wrong attribute: prob=\"{prob_attr}\" "
+                     f"is a min,max range, which belongs in count (prob is a 0-1 chance). "
+                     f"Patched: read as count=\"{prob_attr}\" with no prob, which defaults to always")
                 count_attr, prob_attr = prob_attr, "1"
             ctx = f"{RECYCLE_FILE.name} <output name=\"{out_name}\">"
             count_min, count_max = _parse_count_range(count_attr or "1", f"{ctx} count")
@@ -2732,7 +2803,7 @@ def load_variant_helper_candidates():
                 if helper is None:
                     helper = target
                 if target not in known_names:
-                    warn(f"block '{name}': CanPickup param1 '{target}' does not match any known item or block -- picking this up in-game will not return the intended item")
+                    warn(f"block '{name}': CanPickup param1 '{target}' does not match any known item or block -- picking this up in-game will not return the intended item. Not patched: left as the mod defines it")
             if not helper:
                 continue
             ci = re.search(r'CustomIcon" value="([^"]+)"', body)

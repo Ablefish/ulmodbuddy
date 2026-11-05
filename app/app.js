@@ -144,6 +144,29 @@ window.ULModBuddyApp = (function () {
     return (Math.round(qty * 100) / 100).toString();
   }
 
+  // The count column for an ingredient row. When a mod changed the count, the
+  // new value is red and the original follows it struck through.
+  // `was` of "0" is a real original (a line the mod added), so it must not fall
+  // back to 1 the way `parseFloat(x) || 1` would.
+  function wasQty(v) {
+    const n = parseFloat(v);
+    return Number.isNaN(n) ? 1 : n;
+  }
+
+  // An ingredient line's quantity. A missing/unreadable count is 1, but an
+  // explicit 0 is 0 (a mod can set one, and Undead Legacy can ship one that a
+  // mod then raises), so this must not be `parseFloat(x) || 1`.
+  function ingQty(c) {
+    return wasQty(c);
+  }
+
+  function countHtml(qty, was) {
+    if (was === undefined || was === qty) return `<span class="ing-count">${qtyLabel(qty)}&times;</span>`;
+    // A line the mod added (it wasn't in Undead Legacy): green, with a struck 0x.
+    if (was === 0) return `<span class="ing-count ing-added">${qtyLabel(qty)}&times;</span><s class="ing-was">0&times;</s>`;
+    return `<span class="ing-count ing-modded">${qtyLabel(qty)}&times;</span><s class="ing-was">${qtyLabel(was)}&times;</s>`;
+  }
+
   // ---------------------------------------------------------------------
   // Workstation tiers -- each tier of a station (Tier 1, Tier 2, ...) is
   // browsed as its own item instead of an abstract "upgrade" entry.
@@ -1635,9 +1658,12 @@ window.ULModBuddyApp = (function () {
     return (recipe.ingredients || [])
       .filter((ing) => ing.name)
       .map((ing) => {
-        const qty = parseFloat(ing.count) || 1;
-        return `<li>${reportRowIcon(ing.name)}<span class="ing-count">${qtyLabel(qty)}×</span><span>${displayName(ing.name)}</span></li>`;
+        const qty = ingQty(ing.count);
+        const was = ing.was !== undefined ? wasQty(ing.was) : undefined;
+        return `<li>${reportRowIcon(ing.name)}${countHtml(qty, was)}<span>${displayName(ing.name)}</span></li>`;
       })
+      .concat((recipe.removedIngredients || []).map((r) =>
+        `<li>${reportRowIcon(r.name)}${countHtml(0, parseFloat(r.was) || 1)}<span>${displayName(r.name)}</span></li>`))
       .join("");
   }
 
@@ -2017,8 +2043,11 @@ window.ULModBuddyApp = (function () {
         card += up.ingredients
           .map(
             (ing) =>
-              `<li>${reportRowIcon(ing.name)}<span class="ing-count">${qtyLabel(Number(ing.count))}&times;</span>${jumpSpan(ing.name, displayName(ing.name))}</li>`
+              `<li>${reportRowIcon(ing.name)}${countHtml(Number(ing.count), ing.was !== undefined ? Number(ing.was) : undefined)}${jumpSpan(ing.name, displayName(ing.name))}</li>`
           )
+          .concat((up.removedIngredients || []).map(
+            (r) => `<li>${reportRowIcon(r.name)}${countHtml(0, Number(r.was))}${jumpSpan(r.name, displayName(r.name))}</li>`
+          ))
           .join("");
         card += `</ul></div>`;
         return card;
@@ -2110,8 +2139,11 @@ window.ULModBuddyApp = (function () {
     // down and repair it" car (Sedan, SUV, Ambulance...) has no recipe of
     // its own at all and only ever reaches a page via the "item" fallback
     // (see orphanCandidates) -- so this card is appended regardless of kind
-    // rather than living inside the if/else above.
-    if (data.vehicles && data.vehicles[name]) {
+    // rather than living inside the if/else above. Not on a research page,
+    // though: that is the research node (the cost to learn it), and the
+    // vehicle's stats and repair costs belong to the craftable/item of the
+    // same name.
+    if (kind !== "research" && data.vehicles && data.vehicles[name]) {
       const v = data.vehicles[name];
       html += `<div class="variant-card">`;
       if (v.cargoCapacity != null) html += `<div class="kv-row"><span class="k">Cargo Capacity</span><span>${v.cargoCapacity} kg</span></div>`;
@@ -2198,7 +2230,26 @@ window.ULModBuddyApp = (function () {
   // ingredients, and research-cost ingredients -- they all follow the same
   // rule. `totalsMap` is construction- or one-time-totals depending on the
   // caller, keeping those two counts separate.
-  function buildIngredientNode(ctx, totalsMap, name, qty, path, ancestry) {
+  // `ing` (optional) is the ingredient line this node came from: when a mod
+  // changed its count, the node carries the original (scaled the same way as
+  // qty) so the row can show both.
+  // `mult` is how many of the parent are being made (1 when the line isn't
+  // scaled), so the original is scaled exactly like qty.
+  function buildIngredientNode(ctx, totalsMap, name, qty, path, ancestry, ing, mult) {
+    const node = buildIngredientNodeCore(ctx, totalsMap, name, qty, path, ancestry);
+    if (ing && ing.was !== undefined) node.was = wasQty(ing.was) * (mult === undefined ? 1 : mult);
+    return node;
+  }
+
+  // Lines a mod removed are no longer in `ingredients` (so no cost maths sees
+  // them) but are kept on the holder so they can still be listed, as 0x.
+  function appendRemoved(children, holder, mult) {
+    (holder.removedIngredients || []).forEach((r) =>
+      children.push({ kind: "removed", name: r.name, qty: 0, was: (parseFloat(r.was) || 1) * (mult || 1) })
+    );
+  }
+
+  function buildIngredientNodeCore(ctx, totalsMap, name, qty, path, ancestry) {
     const ids = data.recipesByName[name];
     if (!ids || !ids.length) {
       bump(totalsMap, name, qty);
@@ -2231,10 +2282,11 @@ window.ULModBuddyApp = (function () {
     newAncestry.add(name);
     recipe.ingredients.forEach((ing, i) => {
       if (!ing.name) return;
-      const subQty = (parseFloat(ing.count) || 1) * qty;
+      const subQty = (ingQty(ing.count)) * qty;
       const childPath = path + "/" + i + ":" + ing.name;
-      node.children.push(buildIngredientNode(ctx, totalsMap, ing.name, subQty, childPath, newAncestry));
+      node.children.push(buildIngredientNode(ctx, totalsMap, ing.name, subQty, childPath, newAncestry, ing, qty));
     });
+    appendRemoved(node.children, recipe, qty);
     sortByQtyDesc(node.children);
     return node;
   }
@@ -2287,9 +2339,10 @@ window.ULModBuddyApp = (function () {
         if (!ing.name) return;
         const childPath = path + "/" + i + ":" + ing.name;
         node.children.push(
-          buildIngredientNode(ctx, ctx.oneTimeTotals, ing.name, parseFloat(ing.count) || 1, childPath, new Set())
+          buildIngredientNode(ctx, ctx.oneTimeTotals, ing.name, ingQty(ing.count), childPath, new Set(), ing)
         );
       });
+      appendRemoved(node.children, upgrade);
       if (upgrade.tools.length) {
         node.toolRef = upgrade.tools[0];
         registerToolTrigger(ctx, upgrade.tools[0], `upgrading to ${workstationDisplayName(area)}`);
@@ -2301,9 +2354,10 @@ window.ULModBuddyApp = (function () {
         if (!ing.name) return;
         const childPath = path + "/" + i + ":" + ing.name;
         node.children.push(
-          buildIngredientNode(ctx, ctx.oneTimeTotals, ing.name, parseFloat(ing.count) || 1, childPath, new Set())
+          buildIngredientNode(ctx, ctx.oneTimeTotals, ing.name, ingQty(ing.count), childPath, new Set(), ing)
         );
       });
+      appendRemoved(node.children, recipe);
       if (recipe.tool) {
         node.toolRef = recipe.tool;
         registerToolTrigger(ctx, recipe.tool, workstationDisplayName(area));
@@ -2331,9 +2385,10 @@ window.ULModBuddyApp = (function () {
         if (!ing.name) return;
         const childPath = path + "/" + i + ":" + ing.name;
         node.children.push(
-          buildIngredientNode(ctx, ctx.oneTimeTotals, ing.name, parseFloat(ing.count) || 1, childPath, new Set())
+          buildIngredientNode(ctx, ctx.oneTimeTotals, ing.name, ingQty(ing.count), childPath, new Set(), ing)
         );
       });
+      appendRemoved(node.children, recipe);
     } else {
       bump(ctx.oneTimeTotals, name, 1);
     }
@@ -2358,9 +2413,10 @@ window.ULModBuddyApp = (function () {
       .forEach((ing, i) => {
         const childPath = path + "/" + i + ":" + ing.name;
         node.children.push(
-          buildIngredientNode(ctx, ctx.oneTimeTotals, ing.name, parseFloat(ing.count) || 1, childPath, new Set())
+          buildIngredientNode(ctx, ctx.oneTimeTotals, ing.name, ingQty(ing.count), childPath, new Set(), ing)
         );
       });
+    appendRemoved(node.children, rnode);
     sortByQtyDesc(node.children);
     if (rnode.area) registerWorkstationTrigger(ctx, rnode.area, displayName(name));
     if (rnode.parent && data.research[rnode.parent]) node.parentNode = buildResearchNode(ctx, rnode.parent, shown);
@@ -2404,12 +2460,13 @@ window.ULModBuddyApp = (function () {
         registerToolTrigger(ctx, recipe.tool, displayName(name));
         recipe.ingredients.forEach((ing, i) => {
           if (!ing.name) return;
-          const subQty = (parseFloat(ing.count) || 1) * qty;
+          const subQty = (ingQty(ing.count)) * qty;
           const childPath = "root/" + i + ":" + ing.name;
           constructionTree.children.push(
-            buildIngredientNode(ctx, ctx.constructionTotals, ing.name, subQty, childPath, new Set([name]))
+            buildIngredientNode(ctx, ctx.constructionTotals, ing.name, subQty, childPath, new Set([name]), ing, qty)
           );
         });
+        appendRemoved(constructionTree.children, recipe, qty);
         sortByQtyDesc(constructionTree.children);
       }
     } else if (kind === "workstation") {
@@ -2430,9 +2487,10 @@ window.ULModBuddyApp = (function () {
             if (!ing.name) return;
             const childPath = "root/" + i + ":" + ing.name;
             constructionTree.children.push(
-              buildIngredientNode(ctx, ctx.constructionTotals, ing.name, parseFloat(ing.count) || 1, childPath, new Set([name]))
+              buildIngredientNode(ctx, ctx.constructionTotals, ing.name, ingQty(ing.count), childPath, new Set([name]), ing)
             );
           });
+          appendRemoved(constructionTree.children, recipe);
           sortByQtyDesc(constructionTree.children);
         }
       } else {
@@ -2446,9 +2504,10 @@ window.ULModBuddyApp = (function () {
           if (!ing.name) return;
           const childPath = "root/" + i + ":" + ing.name;
           constructionTree.children.push(
-            buildIngredientNode(ctx, ctx.constructionTotals, ing.name, parseFloat(ing.count) || 1, childPath, new Set([name]))
+            buildIngredientNode(ctx, ctx.constructionTotals, ing.name, ingQty(ing.count), childPath, new Set([name]), ing)
           );
         });
+        appendRemoved(constructionTree.children, upgrade);
         sortByQtyDesc(constructionTree.children);
         // The previous tier is a workstation requirement, not a consumed
         // ingredient -- it belongs in the Workstations section like any
@@ -2499,12 +2558,15 @@ window.ULModBuddyApp = (function () {
   // ---- render pass ------------------------------------------------------
 
   function renderIngredientNode(node) {
+    if (node.kind === "removed") {
+      return `<li class="req-leaf">${reportRowIcon(node.name)}${countHtml(0, node.was)}${jumpSpan(node.name, displayName(node.name))}</li>`;
+    }
     if (node.kind === "material") {
       // No "raw material -- no recipe" note here: the absence of a Craft
       // acquisition badge already says that. Circular reference stays --
       // it's a real edge case the badges don't cover.
       const tag = node.circular ? ` <span class="req-flag">(circular reference &mdash; counted as raw here)</span>` : "";
-      return `<li class="req-leaf">${reportRowIcon(node.name)}<span class="ing-count">${qtyLabel(node.qty)}&times;</span>${jumpSpan(node.name, displayName(node.name))}${tag} ${acquisitionBadges(node.name)}</li>`;
+      return `<li class="req-leaf">${reportRowIcon(node.name)}${countHtml(node.qty, node.was)}${jumpSpan(node.name, displayName(node.name))}${tag} ${acquisitionBadges(node.name)}</li>`;
     }
     // Plain text, not jumpSpan: this whole row is a click-to-toggle target,
     // and a nested navigate-away link on the name would make clicking
@@ -2513,7 +2575,7 @@ window.ULModBuddyApp = (function () {
     // parenthetical here either -- the acquisition badges already cover
     // that ground without crowding the row.
     const caret = `<span class="req-caret">${node.open ? "▾" : "▸"}</span>`;
-    const row = `${caret}${reportRowIcon(node.name)}<span class="ing-count">${qtyLabel(node.qty)}&times;</span><span>${displayName(node.name)}</span> ${acquisitionBadges(node.name)}`;
+    const row = `${caret}${reportRowIcon(node.name)}${countHtml(node.qty, node.was)}<span>${displayName(node.name)}</span> ${acquisitionBadges(node.name)}`;
     if (!node.open) {
       return `<li><div class="req-toggle" data-path="${node.path}">${row}</div></li>`;
     }
@@ -2837,11 +2899,7 @@ window.ULModBuddyApp = (function () {
           rootInner += `<li class="req-leaf req-dim">Tool: <span>${displayName(report.constructionTree.toolRef)}</span> <span class="req-flag-dim">(see Tools below)</span></li>`;
         }
       }
-      const appliedMods = (data.otherMods || []).filter((m) => m.applied);
-      const modNotice = appliedMods.length
-        ? `<div class="mods-card-warning">Costs include changes from mods: ${appliedMods.map((m) => `<strong>${m.name.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]))}</strong>`).join(", ")}</div>`
-        : "";
-      html += `<div class="variant-card">${modNotice}<div class="req-flag-dim" style="margin:0 0 10px;">${costIntro}</div><ul class="req-tree req-tree-root"><li>${rootRow}<ul class="req-tree">${rootInner}</ul></li></ul></div>`;
+      html += `<div class="variant-card"><div class="req-flag-dim" style="margin:0 0 10px;">${costIntro}</div><ul class="req-tree req-tree-root"><li>${rootRow}<ul class="req-tree">${rootInner}</ul></li></ul></div>`;
     }
 
     // Section 2 -- one-time research/workstation/tool investment: each part
@@ -2881,7 +2939,8 @@ window.ULModBuddyApp = (function () {
     }
 
     // Last on the page: a reference extra, not part of acquiring/crafting.
-    html += renderMaintenanceSection(name);
+    // Not on a research page, for the same reason as the vehicle card above.
+    if (kind !== "research") html += renderMaintenanceSection(name);
 
     detailEl.innerHTML = html;
     tintGradeBadges(detailEl);

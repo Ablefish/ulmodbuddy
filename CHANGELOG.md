@@ -3,6 +3,34 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.5.2] - 2026-11-04
+
+### Added
+
+- **Mod changes shown per ingredient** -- when a mod changes a recipe, each
+  ingredient line shows the new count in red with the original struck
+  through. A line a mod removes stays visible as a red `0x`, so a Tweaks
+  value of 0 on books or research data is still shown. A line a mod adds (or
+  one Undead Legacy ships at 0 that a mod raises) shows the new count in
+  green with a struck `0x`.
+
+### Changed
+
+- **Clearer build warnings** -- each warning now names the specific recipe or
+  entry and says how the tool handled it (patched or left as the mod defines
+  it). The recycler warning now correctly says the entry uses the wrong
+  attribute (`prob` instead of `count`) rather than blaming the value.
+- **The old "costs include changes from mods" banner is gone** -- the
+  per-ingredient display replaces it, so unmodified recipes show nothing extra.
+
+### Fixed
+
+- **Research pages no longer show vehicle stats or maintenance sections**
+  (e.g. the 4x4 Ranger research entry looked like a craftable).
+- **Ingredient counts of 0 displayed as 1x** -- an explicit 0 now stays 0.
+- **Recycler entries using `prob="1,2"`** are read as `count` and no longer
+  trip up the recycler data.
+
 ## [1.5.1] - 2026-11-03
 
 ### Changed

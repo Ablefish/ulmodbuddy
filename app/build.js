@@ -561,25 +561,69 @@ window.ULModBuddyBuilder = (function () {
       if (!m) continue;
       if (shape.kind === "research") {
         const n = data.research[m[1]];
-        return n ? [{ list: n.ingredients, name: m[2], k: m[3] }] : [];
+        return n ? [{ list: n.ingredients, name: m[2], k: m[3], holder: n }] : [];
       }
       if (shape.kind === "upgrade") {
         const u = data.upgrades[m[1]];
-        return u ? [{ list: u.ingredients, name: m[2], k: m[3] }] : [];
+        return u ? [{ list: u.ingredients, name: m[2], k: m[3], holder: u }] : [];
       }
       if (shape.kind === "recipe") {
-        return (data.recipesByName[m[1]] || []).map((id) => ({ list: data.recipes[id].ingredients, name: m[2], k: m[3] }));
+        return (data.recipesByName[m[1]] || []).map((id) => ({ list: data.recipes[id].ingredients, name: m[2], k: m[3], holder: data.recipes[id] }));
       }
       const [, attr, key, copy, quality, ingName, k] = m;
       const out = [];
       for (const b of data.maintenance) {
         if ((attr === "group" ? b.group : b.name) !== key) continue;
         if (copy && b.copy !== Number(copy)) continue;
-        for (const up of b.upgrades) if (up.quality === quality) out.push({ list: up.ingredients, name: ingName, k });
+        for (const up of b.upgrades) if (up.quality === quality) out.push({ list: up.ingredients, name: ingName, k, holder: up });
       }
       return out;
     }
     return null; // not a shape we understand
+  }
+
+  // <append> / <insertAfter> / <insertBefore> of <ingredient> lines onto a
+  // recipe, research node, workstation upgrade or maintenance step. Each added
+  // line is marked was="0" (it didn't exist before the mod) so the app shows it
+  // as new. Returns true if anything was added.
+  function containerTargets(data, xpath) {
+    const base = xpath.replace(/\/ingredient\[.*$/, "");
+    let m = /^\/recipes\/research\[@name='([^']+)'\]$/.exec(base);
+    if (m) return data.research[m[1]] ? [data.research[m[1]]] : [];
+    m = /^\/recipes\/upgrade\[@block='([^']+)'\]$/.exec(base);
+    if (m) return data.upgrades[m[1]] ? [data.upgrades[m[1]]] : [];
+    m = /^\/recipes\/recipe\[@name='([^']+)'\]$/.exec(base);
+    if (m) return (data.recipesByName[m[1]] || []).map((id) => data.recipes[id]);
+    m = /^\/recipes\/modify\[@(group|name)='([^']+)'\](?:\[(\d+)\])?\/upgrade\[@quality='([^']+)'\]$/.exec(base);
+    if (m) {
+      const [, attr, key, copy, quality] = m;
+      const out = [];
+      for (const b of data.maintenance) {
+        if ((attr === "group" ? b.group : b.name) !== key) continue;
+        if (copy && b.copy !== Number(copy)) continue;
+        for (const up of b.upgrades) if (up.quality === quality) out.push(up);
+      }
+      return out;
+    }
+    return null;
+  }
+
+  function applyAddedIngredients(data, xpath, body) {
+    const targets = containerTargets(data, xpath);
+    const lines = [...(body || "").matchAll(/<ingredient\s+([^>]*?)\/?>/g)].map((x) => x[1]);
+    if (targets === null || !lines.length) return false;
+    let added = false;
+    for (const holder of targets) {
+      for (const attrs of lines) {
+        const nm = /name="([^"]*)"/.exec(attrs);
+        const ct = /count="([^"]*)"/.exec(attrs);
+        if (nm) {
+          holder.ingredients.push({ name: nm[1], count: ct ? ct[1] : "1", was: "0" });
+          added = true;
+        }
+      }
+    }
+    return added;
   }
 
   function applyIngredientPatch(target, op, value) {
@@ -589,10 +633,25 @@ window.ULModBuddyBuilder = (function () {
     });
     const chosen = target.k ? hits.slice(Number(target.k) - 1, Number(target.k)) : hits;
     if (!chosen.length) return false;
+    // Remember the original count so the app can show the change: a changed
+    // line keeps its first-seen value in `was`; a removed line leaves the list
+    // (cost maths never sees it) but is recorded in the holder's
+    // `removedIngredients` so it can still be displayed.
     if (op === "set") {
-      for (const i of chosen) target.list[i].count = String(value);
+      for (const i of chosen) {
+        const ing = target.list[i];
+        if (ing.was === undefined) ing.was = ing.count;
+        ing.count = String(value);
+      }
     } else {
-      for (const i of chosen.slice().reverse()) target.list.splice(i, 1);
+      for (const i of chosen.slice().reverse()) {
+        const ing = target.list[i];
+        (target.holder.removedIngredients = target.holder.removedIngredients || []).push({
+          name: ing.name,
+          was: ing.was !== undefined ? ing.was : ing.count,
+        });
+        target.list.splice(i, 1);
+      }
     }
     return true;
   }
@@ -625,11 +684,19 @@ window.ULModBuddyBuilder = (function () {
       const recipesText = await readText(ref(`Mods/${folder}/Config/recipes.xml`, await tryGetFile(config, "recipes.xml")));
       if (recipesText) {
         const text = recipesText.replace(/<!--[\s\S]*?-->/g, "");
-        const re = /<(setattribute|remove)\s+xpath="([^"]*)"(?:\s+name="([^"]*)")?\s*(?:\/>|>([\s\S]*?)<\/\1>)/g;
+        const re = /<(setattribute|remove|append|insertAfter|insertBefore)\s+xpath="([^"]*)"(?:\s+name="([^"]*)")?\s*(?:\/>|>([\s\S]*?)<\/\1>)/g;
         let m;
         while ((m = re.exec(text))) {
           entry.patches++;
           const [, tag, xpath, attrName, value] = m;
+          if (tag === "append" || tag === "insertAfter" || tag === "insertBefore") {
+            if (applyAddedIngredients(data, xpath, value)) entry.applied++;
+            else {
+              entry.unsupported++;
+              if (entry.examples.length < 3) entry.examples.push(xpath);
+            }
+            continue;
+          }
           const isCount = tag === "remove" || attrName === "count";
           const targets = isCount ? patchTargets(data, xpath) : null;
           let ok = false;
@@ -1600,9 +1667,10 @@ window.ULModBuddyBuilder = (function () {
         let probAttr = attr(outEl, "prob", "1");
         if (countAttr === null && probAttr.includes(",")) {
           warn(
-            `${paths.recycleFile.label}: <output name="${outName}"> has prob="${probAttr}" ` +
-              `(a comma-range, never valid for a probability) -- treated as the count ` +
-              `attribute the author meant, prob=1`
+            `${paths.recycleFile.label}: recycling '${inputNames.join(", ")}' -- ` +
+              `<output name="${outName}"> uses the wrong attribute: prob="${probAttr}" ` +
+              `is a min,max range, which belongs in count (prob is a 0-1 chance). ` +
+              `Patched: read as count="${probAttr}" with no prob, which defaults to always`
           );
           [countAttr, probAttr] = [probAttr, "1"];
         }
@@ -2322,7 +2390,7 @@ window.ULModBuddyBuilder = (function () {
             if (!target) continue;
             if (helper === null) helper = target;
             if (!knownNames.has(target)) {
-              warn(`block '${name}': CanPickup param1 '${target}' does not match any known item or block -- picking this up in-game will not return the intended item`);
+              warn(`block '${name}': CanPickup param1 '${target}' does not match any known item or block -- picking this up in-game will not return the intended item. Not patched: left as the mod defines it`);
             }
           }
           if (!helper) continue;
