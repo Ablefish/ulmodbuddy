@@ -3,6 +3,25 @@
 All notable changes to UL Mod Buddy are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.5.3] - 2026-11-07
+
+### Fixed
+
+- **Loot odds were wildly overstated** -- an item buried in a loot table
+  (e.g. the Electric Motor in a Sink Cabinet) read as a high chance because
+  the game's pick-one-of-N pools were ignored. Loot Sources now works out the
+  real chance per container opened, following each pool, weight and repeat
+  count, at the loot stage you pick.
+
+### Changed
+
+- **Chance ranges and a Very Rare section** -- each tier heading shows the
+  real percentage range for its sources, and anything under 0.1% per
+  container opened is listed under **Very Rare** instead of disappearing.
+- **No pointless stage buttons** -- items whose odds never change with loot
+  stage now say so instead of showing buttons that do nothing.
+- **GUIDE** -- the Loot Sources section describes the new behavior.
+
 ## [1.5.2] - 2026-11-04
 
 ### Added

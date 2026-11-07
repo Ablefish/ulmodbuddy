@@ -1314,6 +1314,8 @@ img.icon-ring-workstation {
 .source-tier-label-high { color: var(--always); }
 .source-tier-label-medium { color: var(--accent); }
 .source-tier-label-low { color: var(--unknown); }
+.source-tier-label-rare { color: var(--text-dim); }
+.loot-tier-range { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-dim); margin-left: 6px; }
 
 /* Matches .acq-badges' own convention (margin-left: auto) rather than
    justify-content on the row, so it lines up the same way every other

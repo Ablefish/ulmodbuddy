@@ -549,13 +549,14 @@ window.ULModBuddyApp = (function () {
   // Loot Sources -- a different shape from Harvest/Recycle above (no
   // count, no tier bucket): one row per lootcontainer this item is
   // reachable from, each with the block(s)/killed entity(ies) that
-  // actually lead there, plus its full GATE CHAIN (see build.js's
-  // loadLootSources/flattenLootGroup comments) -- structural reachability,
-  // not verified odds. A stage-dependent gate is a named curve over loot
+  // actually lead there, plus the PATH of selection steps from the
+  // container down to the item (see build.js's loadLootSources/
+  // flattenLootGroup comments) -- worked out into a real chance per
+  // container opened, but inferred from the XML, not play-tested. A stage-dependent gate is a named curve over loot
   // stage (Custom/loot_templates.xml, shipped as data.lootProbTemplates),
   // so unlike Harvest/Recycle this one IS interactive: the stage buttons
   // re-render the same rows against a different point on those curves, a
-  // handful of array lookups multiplied together, not a rebuild.
+  // handful of array lookups, not a rebuild.
   //
   // Why a CHAIN and not one number: a whole weapon tier is routinely
   // gated by a loot_prob_template on the REFERENCE to its group (e.g.
@@ -588,7 +589,29 @@ window.ULModBuddyApp = (function () {
     { tier: "high", label: "High Chance" },
     { tier: "medium", label: "Medium Chance" },
     { tier: "low", label: "Low Chance" },
+    { tier: "rare", label: "Very Rare" },
   ];
+
+  // Anything under this chance per container opened (1 in 1000) is "Very
+  // Rare" no matter how it compares with the item's best source: tiers are
+  // relative, so a lone 0.05% source would otherwise read as "High" just
+  // because nothing better exists.
+  const LOOT_VERY_RARE_BELOW = 0.001;
+
+  // "3.3%", "0.11%", "<0.01%" -- real per-container-opened chance.
+  function lootPercentLabel(p) {
+    const pct = p * 100;
+    if (pct >= 10) return pct.toFixed(0) + "%";
+    if (pct >= 1) return pct.toFixed(1) + "%";
+    if (pct >= 0.01) return pct.toFixed(2) + "%";
+    return "<0.01%";
+  }
+
+  function lootRangeLabel(lo, hi) {
+    const a = lootPercentLabel(lo);
+    const b = lootPercentLabel(hi);
+    return a === b ? `about ${a}` : `${a}–${b}`;
+  }
 
   // Clamps to the nearest defined bin rather than failing outside a
   // template's own authored range -- several flat templates (e.g. "high")
@@ -605,27 +628,60 @@ window.ULModBuddyApp = (function () {
     return stage < sorted[0][0] ? sorted[0][2] : sorted[sorted.length - 1][2];
   }
 
-  // Multiplies every gate's resolved value at `stage` -- see this
-  // section's header comment for why a chain of independent checks, not a
-  // single number, is the right model here.
-  function lootCombinedChanceAtStage(gates, stage) {
-    let combined = 1;
-    for (const [prob, template] of gates) {
-      if (template) {
-        const p = lootProbAtStage(template, stage);
-        if (p === null) return null;
-        combined *= p;
-      } else {
-        combined *= prob;
-      }
-    }
-    return combined;
+  // A group entry's weight at `stage`: a loot_prob_template resolves per
+  // stage, a bare prob is itself, no prob reads as 1. null = a template that
+  // isn't shipped at all (kept distinct from a real, computed 0).
+  function lootEntryWeight(entry, stage) {
+    const [prob, template] = entry;
+    if (template) return lootProbAtStage(template, stage);
+    return prob === null || prob === undefined ? 1 : prob;
   }
 
-  // null = "no gate at all" (unconditional) reads as 1; an unresolvable
-  // template lookup reads as null (kept distinct from a real, computed 0).
+  // Parsed once per row: "group:index[:k]" -> [group, index, k].
+  function lootRowSteps(row) {
+    if (!row._steps) {
+      row._steps = row.path.map((step) => {
+        const [g, i, k] = step.split(":");
+        return [g, Number(i), k === undefined ? 1 : Number(k)];
+      });
+    }
+    return row._steps;
+  }
+
+  // The real per-roll chance of this row's item at `stage`, worked from the
+  // item back up to the container. At each step the entry is either one of
+  // N competing siblings in a pick-one group (its weight / the sum of all
+  // sibling weights -- this is what makes an item buried in a 15-item pool
+  // inside a 9-way pool rare), or an independent roll in a count="all"
+  // group (its own prob, capped at 1). A group picked n times, or a
+  // sub-group rolled k times per selection, gets 1-(1-p)^n / 1-(1-p)^k.
+  // Returns the chance that opening ONE such container yields the item at
+  // least once; null if a referenced template isn't shipped.
   function lootChanceAtStage(row, stage) {
-    return row.gates.length ? lootCombinedChanceAtStage(row.gates, stage) : 1;
+    const steps = lootRowSteps(row);
+    let h = 1;
+    for (let s = steps.length - 1; s >= 0; s--) {
+      const [g, idx, k] = steps[s];
+      const grp = data.lootGroups && data.lootGroups[g];
+      if (!grp) return null;
+      const own = lootEntryWeight(grp.e[idx], stage);
+      if (own === null) return null;
+      const hitIfSelected = k === 1 ? h : 1 - Math.pow(1 - h, k);
+      let q;
+      if (grp.a) {
+        q = Math.min(1, own);
+      } else {
+        let sum = 0;
+        for (const e of grp.e) {
+          const w = lootEntryWeight(e, stage);
+          if (w !== null) sum += w;
+        }
+        q = sum > 0 ? own / sum : 0;
+      }
+      const picks = grp.a ? 1 : grp.n;
+      h = 1 - Math.pow(1 - q * hitIfSelected, picks);
+    }
+    return h;
   }
 
   // High/Medium/Low, exactly like Harvest/Recycle Sources' own tiering
@@ -671,15 +727,23 @@ window.ULModBuddyApp = (function () {
     // (e.g. an AK-47 below loot stage 10 -- its tier's own gate is a flat
     // 0%) is dropped, not shown at all: it isn't a real source at this
     // stage, and listing dead rows just to say so is noise, not help.
-    // Filtered on the ROUNDED percent, not the raw float -- a chance small
-    // enough to still display as 0% is just as much dead-row noise as an
-    // exact 0.
+    // Only an exact 0 is dropped: a tiny-but-real chance (a motor in a sink
+    // cabinet, ~0.1%) is shown, under "Very Rare", so the odds read
+    // honestly instead of the source silently vanishing.
     const withChance = rows
       .map((r) => [r, lootChanceAtStage(r, stage)])
-      .filter(([, p]) => p === null || Math.round(p * 100) > 0);
+      .filter(([, p]) => p === null || p > 1e-9);
 
-    const stageBar =
-      `<div class="loot-stage-bar">Loot stage: ` +
+    // Most plain materials sit in tables with flat odds that never change
+    // with loot stage; buttons that do nothing read as broken, so say so
+    // instead. Compared across the same stages the buttons offer.
+    const stageDependent = rows.some((r) => {
+      const ps = LOOT_STAGE_TIERS.map((s) => lootChanceAtStage(r, s));
+      return ps.some((p) => p === null || Math.abs(p - ps[0]) > 1e-9);
+    });
+    const stageBar = !stageDependent
+      ? `<div class="loot-stage-bar">Odds for this item don't change with loot stage.</div>`
+      : `<div class="loot-stage-bar">Loot stage: ` +
       LOOT_STAGE_TIERS.map(
         (s) =>
           `<button type="button" class="loot-stage-btn${s === stage ? " loot-stage-btn-active" : ""}" ` +
@@ -692,7 +756,11 @@ window.ULModBuddyApp = (function () {
     }
 
     const best = Math.max(...withChance.map(([, p]) => p ?? 0));
-    const tiered = withChance.map(([r, p]) => [r, p === null ? "low" : lootTierFor(p, best)]);
+    const tiered = withChance.map(([r, p]) => [
+      r,
+      p === null ? "low" : p < LOOT_VERY_RARE_BELOW ? "rare" : lootTierFor(p, best),
+      p,
+    ]);
 
     // Flattened per tier -- across every container that landed in this
     // tier, one shared "Found In" list and one shared "Dropped By" list,
@@ -700,11 +768,17 @@ window.ULModBuddyApp = (function () {
     // container's own identity was never the point; where to look and
     // what to kill are.
     const body = LOOT_TIER_SECTIONS.map(({ tier, label }) => {
-      const inTier = tiered.filter(([, t]) => t === tier).map(([r]) => r);
+      const tierRows = tiered.filter(([, t]) => t === tier);
+      const inTier = tierRows.map(([r]) => r);
       if (!inTier.length) return "";
+      const known = tierRows.map(([, , p]) => p).filter((p) => p !== null);
+      const range = known.length ? lootRangeLabel(Math.min(...known), Math.max(...known)) : "";
       const blocks = lootDedupedNames(inTier.flatMap((r) => r.blocks));
       const killedBy = lootDedupedNames(inTier.flatMap((r) => r.killedBy));
-      let html = `<div class="section-label source-tier-label source-tier-label-${tier}">${label} (${blocks.length + killedBy.length})</div>`;
+      let html =
+        `<div class="section-label source-tier-label source-tier-label-${tier}">${label} (${blocks.length + killedBy.length})` +
+        (range ? ` <span class="loot-tier-range">${range} per container opened</span>` : "") +
+        `</div>`;
       if (blocks.length) html += `<div class="loot-subheader">Found In</div>${lootNameListHtml(blocks)}`;
       if (killedBy.length) html += `<div class="loot-subheader">Dropped By</div>${lootNameListHtml(killedBy)}`;
       return html;

@@ -1059,15 +1059,17 @@ def load_acquisition_channels():
 #     one is possible (a weighted LootDropEntityClass list, or an item
 #     reachable via more than one <lootgroup> path) -- only presence is
 #     tracked, not relative weight.
-#   - The final weighted pick among an already-gated group's own siblings
-#     (a bare prob > 1, e.g. groupWater's `prob="2"` sibling, is a relative
-#     WEIGHT for this step, not a chance -- genuinely unresolved from XML
-#     alone how it combines with siblings, so it's dropped rather than
-#     multiplied in as if it were a probability). What IS modeled: each
-#     `gates` entry is an independent access check multiplied together --
-#     see _flatten_loot_group's own comment for why this matters (a whole
-#     weapon tier is gated by a loot_prob_template on the REFERENCE to its
-#     group, not on each weapon inside it).
+#   - Quality, stack size and the item's own count -- only whether the item
+#     shows up at all.
+# What IS modeled: the selection structure itself. Every group is either
+# take-all (count="all": each entry rolled on its own prob) or pick-N
+# (count absent = 1 pick; each entry's weight / the sum of its siblings'
+# weights is its share), and a reference's own count rolls its sub-group
+# that many times. An item's row carries the PATH of those steps from the
+# container down (plus a shared table of the groups involved), and app.js
+# works the real per-container-opened chance out at the chosen loot stage.
+# That is what makes an item buried in a 15-entry pool inside a 9-way pool
+# (e.g. the Electric Motor) come out around 0.1%, not "always".
 # ---------------------------------------------------------------------------
 def load_loot_templates():
     """Returns {template_name: [(lo, hi, prob), ...]} for every
@@ -1097,29 +1099,61 @@ def load_loot_templates():
     return templates
 
 
-def _own_gate(prob_attr, template_attr):
-    """An <item>/group-reference line's OWN gate, as (prob, template) --
-    or None if this line places no restriction of its own. A bare prob > 1
-    is a relative WEIGHT among sibling entries once that slot is already
-    being rolled (see chat: real probabilities can't exceed 1 -- e.g.
-    groupWater's `prob="2"` sibling), not a chance to be reached at all;
-    mixing an unnormalized weight into the multiplicative gate chain below
-    would be nonsensical, so it's dropped here rather than misrepresented."""
+def _entry_weight(prob_attr, template_attr):
+    """An <item> line's own prob/loot_prob_template as [prob, template]
+    (exactly one is non-null), or None for "no prob given" (reads as 1).
+    NOT clamped to 1: inside a pick-one group a bare prob (even > 1, e.g.
+    groupWater's `prob="2"`) is a relative WEIGHT against its siblings --
+    which is exactly how the app uses it (weight / sum of sibling weights).
+    In a count="all" group it is a chance instead, and the app clamps it."""
     if template_attr:
-        return (None, template_attr)
+        return [None, template_attr]
     if prob_attr is not None:
-        p = float(prob_attr)
-        if p <= 1:
-            return (p, None)
+        try:
+            return [float(prob_attr), None]
+        except ValueError:
+            return None
     return None
 
 
+def _loot_count_spec(count_attr):
+    """A lootgroup/lootcontainer `count` as (take_all, avg_picks). Absent =
+    one pick; "all" = every entry is rolled on its own chance; "a,b" = a
+    random number of picks (modeled as the average)."""
+    if count_attr is None or not count_attr.strip():
+        return (False, 1.0)
+    c = count_attr.strip().lower()
+    if c == "all":
+        return (True, 1.0)
+    try:
+        nums = [float(x) for x in c.split(",")]
+    except ValueError:
+        return (False, 1.0)
+    return (False, sum(nums) / len(nums))
+
+
+def _loot_entries(el):
+    """[(kind, ref, weight, k), ...] for a group/container element's <item>
+    children. k = how many times a referenced SUB-group is rolled each time
+    it is selected (the reference's own `count`, averaged); 1 for leaf items
+    (their count is a stack size, not a number of rolls)."""
+    entries = []
+    for child in el.iter("item"):
+        weight = _entry_weight(child.attrib.get("prob"), child.attrib.get("loot_prob_template"))
+        if child.attrib.get("name"):
+            entries.append(("item", child.attrib["name"], weight, 1.0))
+        elif child.attrib.get("group"):
+            take_all, avg = _loot_count_spec(child.attrib.get("count"))
+            entries.append(("group", child.attrib["group"], weight, 1.0 if take_all else max(avg, 0.0)))
+    return entries
+
+
 def _parse_loot_group_family(files, group_tag):
-    """Like _parse_named_group_family, but keeps each entry's own gate
-    (see _own_gate) alongside its name instead of just presence --
-    load_loot_sources() needs it to build each leaf's full gate CHAIN, not
-    just its own line. Returns {group_name: [(kind, ref, gate), ...]};
-    gate is None or (prob, template)."""
+    """Returns {group_name: {"all": bool, "n": avg_picks, "entries":
+    [(kind, ref, weight, k), ...]}} -- the whole selection structure
+    (pick-one vs take-all, weights), not just names, because the chance of
+    a given item depends on how many siblings it competes with at every
+    level (see load_loot_sources)."""
     groups = {}
     for path in files:
         if not path.exists():
@@ -1132,47 +1166,40 @@ def _parse_loot_group_family(files, group_tag):
             name = el.attrib.get("name")
             if not name:
                 continue
-            children = []
-            for child in el.iter("item"):
-                gate = _own_gate(child.attrib.get("prob"), child.attrib.get("loot_prob_template"))
-                if child.attrib.get("name"):
-                    children.append(("item", child.attrib["name"], gate))
-                elif child.attrib.get("group"):
-                    children.append(("group", child.attrib["group"], gate))
-            groups[name] = children
+            take_all, n = _loot_count_spec(el.attrib.get("count"))
+            groups[name] = {"all": take_all, "n": n, "entries": _loot_entries(el)}
     return groups
 
 
-def _flatten_loot_group(name, groups, visited, out, gates):
-    """Recursively resolves one group reference down to leaf items,
-    accumulating into `out` ({item_name: [(prob, template), ...]}).
-    `gates` is the CHAIN accumulated from the root down to `name` --
-    carrying this forward matters a lot here: a whole weapon tier is
-    routinely gated by a loot_prob_template on the REFERENCE to its group
-    (e.g. groupRanged's own <item group="groupRangedT1"
-    loot_prob_template="ProbT1"/>), not on each weapon inside it. An
-    earlier version of this function only kept a leaf's OWN line, which
-    silently showed e.g. the AK-47 as unconditionally available at every
-    loot stage -- wrong: it lives in groupRangedT1, gated by ProbT1, which
-    is 0% below loot stage 10. The FIRST path found to a given leaf still
-    wins if it's reachable more than one way -- an accepted simplification
-    (see this module's own header comment on this feature)."""
-    if name in visited:
+def _loot_step(key, idx, k):
+    return f"{key}:{idx}" + ("" if k == 1 else ":%g" % k)
+
+
+def _flatten_loot_group(name, groups, visited, out, path):
+    """Resolves one group reference down to leaf items, recording for each
+    the PATH of selection steps that leads to it: "group:index[:k]" strings
+    (k = rolls of the next sub-group per selection), from the container
+    down. The app turns a path into a real chance at a loot stage: at each
+    step the entry's weight is compared with its siblings' (pick-one) or
+    taken on its own (take-all), then repeated for the group's pick count.
+    The FIRST path found to a leaf still wins when it is reachable more than
+    one way -- an accepted simplification (it can only under-count)."""
+    if name in visited or name not in groups:
         return
     visited.add(name)
-    for kind, ref, gate in groups.get(name, []):
-        child_gates = gates + [gate] if gate else gates
+    for idx, (kind, ref, _w, k) in enumerate(groups[name]["entries"]):
+        step = _loot_step(name, idx, k)
         if kind == "item":
             if ref not in out:
-                out[ref] = child_gates
+                out[ref] = path + [step]
         else:
-            _flatten_loot_group(ref, groups, visited, out, child_gates)
+            _flatten_loot_group(ref, groups, visited, out, path + [step])
 
 
 def _load_container_to_items():
-    """Returns {container_name: {"items": {item_name: [(prob, template), ...]},
-    "meta": {...container's own attrs...}}} -- each item's value is its full
-    gate chain (see _flatten_loot_group), empty if nothing gates it at all.
+    """Returns ({container_name: {"items": {item_name: path}}}, groups).
+    Each container is added to `groups` as a pseudo-group "@<name>" (its
+    direct <item> lines, picked `count` times) so a path can start there.
     Uses LOOT_GROUP_FILES_FOR_SOURCES, not the full LOOT_GROUP_FILES -- see
     that constant's own comment for why quest-reward groups are excluded
     here specifically."""
@@ -1180,7 +1207,7 @@ def _load_container_to_items():
     containers = {}
     if not LOOT_CONTAINERS_FILE.exists():
         warn(f"missing expected file: {LOOT_CONTAINERS_FILE}")
-        return containers
+        return containers, loot_groups
     text = read_text(LOOT_CONTAINERS_FILE)
     for frag in scan_blocks(text, "lootcontainer"):
         el = parse_fragment(frag, LOOT_CONTAINERS_FILE.name)
@@ -1189,18 +1216,20 @@ def _load_container_to_items():
         name = el.attrib.get("name")
         if not name:
             continue
+        take_all, n = _loot_count_spec(el.attrib.get("count"))
+        key = "@" + name
+        loot_groups[key] = {"all": take_all, "n": n, "entries": _loot_entries(el)}
         items = {}
         visited = set()
-        for item_el in el.iter("item"):
-            gate = _own_gate(item_el.attrib.get("prob"), item_el.attrib.get("loot_prob_template"))
-            if item_el.attrib.get("name"):
-                iname = item_el.attrib["name"]
-                if iname not in items:
-                    items[iname] = [gate] if gate else []
-            elif item_el.attrib.get("group"):
-                _flatten_loot_group(item_el.attrib["group"], loot_groups, visited, items, [gate] if gate else [])
-        containers[name] = {"items": items, "meta": dict(el.attrib)}
-    return containers
+        for idx, (kind, ref, _w, k) in enumerate(loot_groups[key]["entries"]):
+            step = _loot_step(key, idx, k)
+            if kind == "item":
+                if ref not in items:
+                    items[ref] = [step]
+            else:
+                _flatten_loot_group(ref, loot_groups, visited, items, [step])
+        containers[name] = {"items": items}
+    return containers, loot_groups
 
 
 # ---------------------------------------------------------------------------
@@ -1337,20 +1366,19 @@ def _load_entity_kill_to_container():
 
 
 def load_loot_sources():
-    """Returns {item_name: [{"container", "gates", "blocks", "killedBy"},
-    ...]}. `gates` is the item's full chain of independent access checks
-    from the container down to it (see _flatten_loot_group) -- each entry
-    is [prob, template] (prob XOR template, the other null), e.g. the AK-47
-    carries a single gate on "ProbT1" (0% below loot stage 10) from its
-    tier group being referenced with loot_prob_template, not from anything
-    on its own <item> line. An empty list means nothing gates it at all.
+    """Returns ({item_name: [{"container", "path", "blocks", "killedBy"},
+    ...]}, loot_groups). `path` is the chain of selection steps from the
+    container down to the item (see _flatten_loot_group); `loot_groups` is
+    the shared table of every group a path touches, {key: {"a": take_all,
+    "n": avg_picks, "e": [[prob, template], ...]}} (entry order matches the
+    step index; [1, null] = no prob given). Together they let the app work
+    out a real per-roll chance at any loot stage.
     Drops any container that isn't reachable via a real in-world block or a
     killable entity (trader/quest/twitch-only pools, or ones reached only
     through an unresolved Extends chain) -- an unreachable container name
-    would be noise, not help, the same call already made for the
-    standalone loot-source prototype this replaces."""
+    would be noise, not help."""
     placeholders = load_block_placeholders()
-    containers = _load_container_to_items()
+    containers, all_groups = _load_container_to_items()
     container_to_blocks = {}
     for block_name, container_name in _load_block_to_lootlist(placeholders).items():
         container_to_blocks.setdefault(container_name, []).append(block_name)
@@ -1360,19 +1388,30 @@ def load_loot_sources():
             container_to_entities.setdefault(cname, []).append(entity_name)
 
     loot_sources = {}
+    used = set()
     for container_name, info in containers.items():
         blocks = sorted(container_to_blocks.get(container_name, []))
         entities = sorted(container_to_entities.get(container_name, []))
         if not blocks and not entities:
             continue
-        for item_name, gates in info["items"].items():
+        for item_name, path in info["items"].items():
             loot_sources.setdefault(item_name, []).append({
                 "container": container_name,
-                "gates": gates,
+                "path": path,
                 "blocks": blocks,
                 "killedBy": entities,
             })
-    return loot_sources
+            for step in path:
+                used.add(step.split(":")[0])
+    loot_groups = {}
+    for key in sorted(used):
+        g = all_groups[key]
+        loot_groups[key] = {
+            "a": 1 if g["all"] else 0,
+            "n": round(g["n"], 4),
+            "e": [list(w) if w else [1, None] for (_k, _r, w, _kk) in g["entries"]],
+        }
+    return loot_sources, loot_groups
 
 
 # ---------------------------------------------------------------------------
@@ -3090,7 +3129,7 @@ def main(install_root):
     print(f"  {len(loot_prob_templates)} prob templates")
 
     print("Loading loot sources (which real containers/kills give which items)...")
-    loot_sources = load_loot_sources()
+    loot_sources, loot_groups = load_loot_sources()
     print(f"  {len(loot_sources)} distinct item(s) with a real-world loot source")
 
     print("Loading harvestable (block drop tables)...")
@@ -3417,6 +3456,7 @@ def main(install_root):
         "acquisition": acquisition,
         "lootProbTemplates": loot_prob_templates,  # {name: [(lo, hi, prob), ...]} -- tuples serialize as JSON arrays
         "lootSources": loot_sources,
+        "lootGroups": loot_groups,  # shared selection tables the lootSources paths refer to
         "pois": pois,  # {prefab: {tier, mod}} -- only prefabs holding a known block
         "poiBlocks": poi_blocks,  # {block: {prefab: count}}
         "harvestSources": harvest_sources,

@@ -987,14 +987,16 @@ window.ULModBuddyBuilder = (function () {
   //     than one is possible (a weighted LootDropEntityClass list, or an
   //     item reachable via more than one <lootgroup> path) -- only
   //     presence is tracked, not relative weight.
-  //   - The final weighted pick among an already-gated group's own
-  //     siblings (a bare prob > 1, e.g. groupWater's `prob="2"` sibling,
-  //     is a relative WEIGHT for this step, not a chance -- genuinely
-  //     unresolved from XML alone how it combines with siblings, so it's
-  //     dropped rather than multiplied in as if it were a probability).
-  //     What IS modeled: each `gates` entry (see flattenLootGroup) is an
-  //     independent access check, multiplied together in app.js for the
-  //     combined chance at a given loot stage.
+  //   - Quality, stack size and the item's own count -- only whether the
+  //     item shows up at all.
+  // What IS modeled: the selection structure itself. Every group is either
+  // take-all (count="all": each entry rolled on its own prob) or pick-N
+  // (count absent = 1 pick; each entry's weight / the sum of its siblings'
+  // weights is its share), and a reference's own count rolls its sub-group
+  // that many times. An item's row carries the PATH of those steps from
+  // the container down (plus a shared table of the groups involved), and
+  // app.js works the real per-container-opened chance out at the chosen
+  // loot stage.
   // -------------------------------------------------------------------
   async function loadLootTemplates(paths) {
     const templates = {};
@@ -1015,29 +1017,57 @@ window.ULModBuddyBuilder = (function () {
     return templates;
   }
 
-  // An <item>/group-reference element's OWN gate, as [prob, template] --
-  // or null if this line places no restriction of its own. A bare prob > 1
-  // is a relative WEIGHT among sibling entries once that slot is already
-  // being rolled (see chat: real probabilities can't exceed 1 -- e.g.
-  // groupWater's `prob="2"` sibling), not a chance to be reached at all;
-  // mixing an unnormalized weight into the multiplicative gate chain below
-  // would be nonsensical, so it's dropped here rather than misrepresented.
-  function lootOwnGate(el) {
+  // An <item> line's own prob/loot_prob_template as [prob, template]
+  // (exactly one non-null), or null for "no prob given" (reads as 1). NOT
+  // clamped to 1: inside a pick-one group a bare prob (even > 1, e.g.
+  // groupWater's prob="2") is a relative WEIGHT against its siblings --
+  // which is exactly how the app uses it (weight / sum of sibling weights).
+  // In a count="all" group it is a chance instead, and the app clamps it.
+  function lootEntryWeight(el) {
     const template = attr(el, "loot_prob_template");
     if (template) return [null, template];
     const probRaw = attr(el, "prob");
     if (probRaw !== null) {
-      const p = safeFloat(probRaw, 1);
-      if (p <= 1) return [p, null];
+      const p = parseFloat(probRaw);
+      if (!Number.isNaN(p)) return [p, null];
     }
     return null;
   }
 
-  // Like parseNamedGroupFamily, but keeps each entry's own gate (see
-  // lootOwnGate) alongside its name instead of just presence --
-  // loadLootSources needs each leaf's full gate CHAIN, not just its own
-  // line. Returns {groupName: [["item", name, gate] | ["group", name,
-  // gate], ...]}; gate is null or [prob, template].
+  // A lootgroup/lootcontainer `count` as {all, n}: absent = one pick,
+  // "all" = every entry rolled on its own chance, "a,b" = a random number
+  // of picks (modeled as the average).
+  function lootCountSpec(countAttr) {
+    if (countAttr === null || countAttr === undefined || !countAttr.trim()) return { all: false, n: 1 };
+    const c = countAttr.trim().toLowerCase();
+    if (c === "all") return { all: true, n: 1 };
+    const nums = c.split(",").map(Number);
+    if (nums.some(Number.isNaN)) return { all: false, n: 1 };
+    return { all: false, n: nums.reduce((x, y) => x + y, 0) / nums.length };
+  }
+
+  // [[kind, ref, weight, k], ...] for a group/container element's <item>
+  // children. k = how many times a referenced SUB-group is rolled each time
+  // it is selected (the reference's own count, averaged); 1 for leaf items
+  // (their count is a stack size, not a number of rolls).
+  function lootEntries(el) {
+    const entries = [];
+    for (const child of Array.from(el.getElementsByTagName("item"))) {
+      const weight = lootEntryWeight(child);
+      if (attr(child, "name")) {
+        entries.push(["item", attr(child, "name"), weight, 1]);
+      } else if (attr(child, "group")) {
+        const spec = lootCountSpec(attr(child, "count"));
+        entries.push(["group", attr(child, "group"), weight, spec.all ? 1 : Math.max(spec.n, 0)]);
+      }
+    }
+    return entries;
+  }
+
+  // Returns {groupName: {all, n, entries}} -- the whole selection structure
+  // (pick-one vs take-all, weights), not just names, because the chance of
+  // a given item depends on how many siblings it competes with at every
+  // level (see loadLootSources).
   async function parseLootGroupFamily(files) {
     const groups = {};
     for (const fileRef of files) {
@@ -1046,72 +1076,67 @@ window.ULModBuddyBuilder = (function () {
       for (const el of scanBlocks(doc, "lootgroup")) {
         const name = attr(el, "name");
         if (!name) continue;
-        const children = [];
-        for (const child of Array.from(el.getElementsByTagName("item"))) {
-          const gate = lootOwnGate(child);
-          const childName = attr(child, "name");
-          if (childName) {
-            children.push(["item", childName, gate]);
-          } else if (attr(child, "group")) {
-            children.push(["group", attr(child, "group"), gate]);
-          }
-        }
-        groups[name] = children;
+        const spec = lootCountSpec(attr(el, "count"));
+        groups[name] = { all: spec.all, n: spec.n, entries: lootEntries(el) };
       }
     }
     return groups;
   }
 
-  // Recursively resolves one group reference down to leaf items,
-  // accumulating into `out` (Map<itemName, [prob, template][]>). `gates`
-  // is the CHAIN accumulated from the root down to `name` -- carrying this
-  // forward matters a lot here: a whole weapon tier is routinely gated by
-  // a loot_prob_template on the REFERENCE to its group (e.g. groupRanged's
-  // own <item group="groupRangedT1" loot_prob_template="ProbT1"/>), not on
-  // each weapon inside it. An earlier version of this function only kept a
-  // leaf's OWN line, which silently showed e.g. the AK-47 as
-  // unconditionally available at every loot stage -- wrong: it lives in
-  // groupRangedT1, gated by ProbT1, which is 0% below loot stage 10. The
-  // FIRST path found to a given leaf still wins if it's reachable more
-  // than one way -- an accepted simplification (see this feature's own
-  // header comment above).
-  function flattenLootGroup(name, groups, visited, out, gates) {
-    if (visited.has(name)) return;
-    visited.add(name);
-    for (const [kind, ref, gate] of groups[name] || []) {
-      const childGates = gate ? [...gates, gate] : gates;
-      if (kind === "item") {
-        if (!out.has(ref)) out.set(ref, childGates);
-      } else {
-        flattenLootGroup(ref, groups, visited, out, childGates);
-      }
-    }
+  function lootStep(key, idx, k) {
+    return `${key}:${idx}` + (k === 1 ? "" : `:${+k.toFixed(4)}`);
   }
 
+  // Resolves one group reference down to leaf items, recording for each the
+  // PATH of selection steps that leads to it: "group:index[:k]" strings
+  // (k = rolls of the next sub-group per selection), from the container
+  // down. The app turns a path into a real chance at a loot stage: at each
+  // step the entry's weight is compared with its siblings' (pick-one) or
+  // taken on its own (take-all), then repeated for the group's pick count.
+  // The FIRST path found to a leaf still wins when it is reachable more
+  // than one way -- an accepted simplification (it can only under-count).
+  function flattenLootGroup(name, groups, visited, out, path) {
+    if (visited.has(name) || !groups[name]) return;
+    visited.add(name);
+    groups[name].entries.forEach(([kind, ref, , k], idx) => {
+      const step = lootStep(name, idx, k);
+      if (kind === "item") {
+        if (!out.has(ref)) out.set(ref, [...path, step]);
+      } else {
+        flattenLootGroup(ref, groups, visited, out, [...path, step]);
+      }
+    });
+  }
+
+  // Returns {containers: {name: {items: Map<item, path>}}, groups}. Each
+  // container is added to `groups` as a pseudo-group "@<name>" (its direct
+  // <item> lines, picked `count` times) so a path can start there.
+  // lootGroupFilesForSources, not lootGroupFiles -- see that path's own
+  // comment for why quest-reward groups are excluded here specifically.
   async function loadContainerToItems(paths) {
-    // lootGroupFilesForSources, not lootGroupFiles -- see that path's own
-    // comment for why quest-reward groups are excluded here specifically.
     const lootGroups = await parseLootGroupFamily(paths.lootGroupFilesForSources);
     const containers = {};
     const doc = await readAndParse(paths.lootContainersFile);
-    if (!doc) return containers;
+    if (!doc) return { containers, groups: lootGroups };
     for (const el of scanBlocks(doc, "lootcontainer")) {
       const name = attr(el, "name");
       if (!name) continue;
+      const spec = lootCountSpec(attr(el, "count"));
+      const key = "@" + name;
+      lootGroups[key] = { all: spec.all, n: spec.n, entries: lootEntries(el) };
       const items = new Map();
       const visited = new Set();
-      for (const itemEl of Array.from(el.getElementsByTagName("item"))) {
-        const gate = lootOwnGate(itemEl);
-        const iname = attr(itemEl, "name");
-        if (iname) {
-          if (!items.has(iname)) items.set(iname, gate ? [gate] : []);
-        } else if (attr(itemEl, "group")) {
-          flattenLootGroup(attr(itemEl, "group"), lootGroups, visited, items, gate ? [gate] : []);
+      lootGroups[key].entries.forEach(([kind, ref, , k], idx) => {
+        const step = lootStep(key, idx, k);
+        if (kind === "item") {
+          if (!items.has(ref)) items.set(ref, [step]);
+        } else {
+          flattenLootGroup(ref, lootGroups, visited, items, [step]);
         }
-      }
+      });
       containers[name] = { items };
     }
-    return containers;
+    return { containers, groups: lootGroups };
   }
 
   // -------------------------------------------------------------------
@@ -1255,7 +1280,7 @@ window.ULModBuddyBuilder = (function () {
   // would be noise, not help.
   async function loadLootSources(paths) {
     const placeholders = await loadBlockPlaceholders(paths);
-    const containers = await loadContainerToItems(paths);
+    const { containers, groups: allGroups } = await loadContainerToItems(paths);
     const containerToBlocks = {};
     const blockToLootList = await loadBlockToLootList(paths, placeholders);
     for (const blockName in blockToLootList) {
@@ -1271,20 +1296,33 @@ window.ULModBuddyBuilder = (function () {
     }
 
     const lootSources = {};
+    const used = new Set();
     for (const containerName in containers) {
       const blocks = (containerToBlocks[containerName] || []).slice().sort();
       const killedBy = (containerToEntities[containerName] || []).slice().sort();
       if (!blocks.length && !killedBy.length) continue;
-      for (const [itemName, gates] of containers[containerName].items) {
+      for (const [itemName, path] of containers[containerName].items) {
         (lootSources[itemName] = lootSources[itemName] || []).push({
           container: containerName,
-          gates,
+          path,
           blocks,
           killedBy,
         });
+        for (const step of path) used.add(step.split(":")[0]);
       }
     }
-    return lootSources;
+    // Shared table of every group a path touches: {key: {a, n, e}} where e
+    // is [[prob, template], ...] in step-index order ([1, null] = no prob).
+    const lootGroups = {};
+    for (const key of Array.from(used).sort()) {
+      const g = allGroups[key];
+      lootGroups[key] = {
+        a: g.all ? 1 : 0,
+        n: Math.round(g.n * 10000) / 10000,
+        e: g.entries.map(([, , w]) => (w ? w : [1, null])),
+      };
+    }
+    return { lootSources, lootGroups };
   }
 
   // -------------------------------------------------------------------
@@ -2623,7 +2661,7 @@ window.ULModBuddyBuilder = (function () {
     log(`  ${Object.keys(lootProbTemplates).length} prob templates`);
 
     log("Loading loot sources (which real containers/kills give which items)...");
-    const lootSources = await loadLootSources(paths);
+    const { lootSources, lootGroups } = await loadLootSources(paths);
     log(`  ${Object.keys(lootSources).length} distinct item(s) with a real-world loot source`);
 
     log("Loading harvestable (block drop tables)...");
@@ -2917,6 +2955,7 @@ window.ULModBuddyBuilder = (function () {
       acquisition,
       lootProbTemplates,
       lootSources,
+      lootGroups,
       pois,
       poiBlocks,
       harvestSources,

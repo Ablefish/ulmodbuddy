@@ -144,13 +144,17 @@ split) -- picking a later stage can turn "not obtainable" into a real
 source, since most loot tables are gated off entirely below their own
 tier's threshold. Sources are grouped the same **High / Medium / Low
 Chance** way Harvest/Recycle/Scrap group by yield, with **Found In** and
-**Dropped By** sub-lists under each tier.
+**Dropped By** sub-lists under each tier. Each heading shows the real
+chance range, per container opened, for the sources in it, and anything
+under 0.1% goes in a separate **Very Rare** section, so a part buried deep
+in a loot table doesn't read as a likely find just because nothing better
+exists.
 
-This is the single most complex calculation in the app -- a container's
-odds can depend on a whole chain of nested loot-group gates, each one
-checked independently for the stage you picked, multiplied together for
-the combined number shown. Treat it as a rough guide to where to look, not
-verified drop odds.
+This is the single most complex calculation in the app -- the game picks
+one entry out of a pool, inside a pool, inside a container, and some
+levels switch on or off with the loot stage you picked. The app follows
+that chain and multiplies the odds at each step to get the number shown.
+Treat it as a rough guide to where to look, not verified drop odds.
 
 ## Found in POIs
 
